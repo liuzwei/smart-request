@@ -3,6 +3,7 @@ name: Build plugin
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -50,3 +51,35 @@ jobs:
       #
       #   - name: Run tests
       #     run: xvfb-run --auto-servernum ./gradlew test
+
+  # Pushing a tag such as v1.0.1 builds the plugin and publishes a GitHub release
+  # with the zip attached.
+  release:
+    name: Publish GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download plugin zip
+        uses: actions/download-artifact@v4
+        with:
+          name: smart-request-plugin
+          path: build/distributions
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Re-running the workflow for the same tag: replace the attached zip.
+            gh release upload "$tag" build/distributions/*.zip --clobber
+          else
+            gh release create "$tag" build/distributions/*.zip \
+              --title "$tag" \
+              --verify-tag \
+              --generate-notes
+          fi

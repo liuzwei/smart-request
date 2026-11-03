@@ -278,10 +278,36 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 产物：
 
 ```text
-build/distributions/smart-request-1.0.0.zip
+build/distributions/smart-request-<version>.zip
 ```
 
 在 IDEA 中打开 `Settings → Plugins → ⚙ → Install Plugin from Disk...`，选择这个 zip，重启即可。
+
+### 自动构建与发布（GitHub Actions）
+
+仓库自带 `.github/workflows/build.yml`，不需要预装 IDEA，runner 只用 JDK 25，IntelliJ Platform 由 Gradle 自动下载：
+
+- push 到 `main`、PR、手动触发：执行 `./gradlew buildPlugin`，把 zip 作为 artifact 上传；
+- push `v*` 形式的 tag：额外创建一个 GitHub Release，并把 zip 作为附件上传。
+
+发版流程：
+
+```powershell
+# 1. 改 build.gradle.kts 里的 version，例如 1.0.2，然后提交推送
+git commit -am "Bump version to 1.0.2"
+git push
+
+# 2. 打 tag 并推送（tag 名与版本号保持一致）
+git tag v1.0.2
+git push origin v1.0.2
+```
+
+说明：
+
+- Release 使用仓库自带的 `GITHUB_TOKEN`，无需额外配置 secret；`release` job 声明了 `contents: write` 权限。
+- 同一个 tag 重跑工作流时，会用 `gh release upload --clobber` 覆盖已有的 zip，不会因为 Release 已存在而失败。
+- 只有 `v*` 的 tag 会发 Release；普通 push/PR 只做构建检查。
+- 测试不在 CI 里跑：UI 测试会真的开 Swing 窗口，需要虚拟显示，必要时用 `xvfb-run --auto-servernum ./gradlew test`。
 
 > **从 Fast Request 升级：** 插件 ID 从 `dev.fastrequest.idea` 改成了 `dev.smartrequest.idea`，IDEA 会把它当作一个新插件。请先在 `Settings → Plugins` 里卸载旧的 **Fast Request**，再安装这个 zip，否则会同时存在两个工具窗口。
 >
