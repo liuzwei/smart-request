@@ -1,0 +1,52 @@
+name: Build plugin
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: buildPlugin (JDK 25)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # Caches ~/.gradle, which includes the IntelliJ Platform distribution that the
+      # IntelliJ Platform Gradle Plugin downloads on the first run (~700 MB).
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # No local IDE needed: without -PlocalIdePath the build downloads IntelliJ IDEA
+      # Community 2026.2.2 from the JetBrains repository and compiles against it.
+      - name: Build plugin
+        run: ./gradlew buildPlugin
+
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-request-plugin
+          path: build/distributions/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      # The tests open real Swing windows (JFrame), so they need a virtual display.
+      # They are not part of buildPlugin; run them explicitly when needed:
+      #
+      #   - name: Run tests
+      #     run: xvfb-run --auto-servernum ./gradlew test
