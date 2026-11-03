@@ -54,6 +54,13 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// Ship the license and disclaimer with the plugin distribution, as required by Apache-2.0.
+tasks.prepareSandbox {
+    from("LICENSE") { into("smart-request") }
+    from("NOTICE") { into("smart-request") }
+    from("DISCLAIMER.md") { into("smart-request") }
+}
+
 intellijPlatform {
     pluginConfiguration {
         id = "dev.smartrequest.idea"
@@ -66,7 +73,8 @@ intellijPlatform {
         }
 
         vendor {
-            name = "smart-request"
+            name = "liuzhaowei"
+            url = "https://github.com/liuzwei/smart-request"
         }
     }
 }

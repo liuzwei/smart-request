@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（私密报告）
+    url: https://github.com/liuzwei/smart-request/security/advisories/new
+    about: 请不要通过公开 Issue 报告安全漏洞，使用 GitHub Security Advisories。
+  - name: 使用问题 / 讨论
+    url: https://github.com/liuzwei/smart-request/discussions
+    about: 安装、配置、变量不生效等使用问题可以在这里讨论。

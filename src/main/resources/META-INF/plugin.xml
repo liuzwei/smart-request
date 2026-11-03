@@ -2,7 +2,7 @@
 <idea-plugin>
     <id>dev.smartrequest.idea</id>
     <name>Smart Request</name>
-    <vendor url="https://github.com/smart-request">smart-request</vendor>
+    <vendor url="https://github.com/liuzwei/smart-request">liuzhaowei</vendor>
 
     <description><![CDATA[
         <p>A lightweight HTTP client inside IntelliJ IDEA, built for quickly exercising Java and Spring controllers.</p>

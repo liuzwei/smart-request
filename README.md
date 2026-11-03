@@ -1,5 +1,9 @@
 # Smart Request
 
+[![Build plugin](https://github.com/liuzwei/smart-request/actions/workflows/build.yml/badge.svg)](https://github.com/liuzwei/smart-request/actions/workflows/build.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/liuzwei/smart-request)](https://github.com/liuzwei/smart-request/releases)
+
 一个运行在 IntelliJ IDEA 里的轻量 HTTP 客户端，用来快速测试 Java / Spring 项目中的 Controller。界面参考了 Postman 和 Cool Request，但实现完全独立。
 
 当前仓库是一个可编译、可运行、可打包的版本，核心链路已经打通：**分组管理请求 → 选择环境 → 解析变量 → 替换 Path 参数 → 合并全局 Header/Params → 发送 HTTP 请求 → 展示响应 → 记录历史/缓存响应**，并支持 Spring Controller 一键导入、变量高亮和自动补全。
@@ -575,3 +579,29 @@ src/main/kotlin/dev/smartrequest/
 - 使用 `localIdePath` 时，平台版本以本机 IDEA 为准；团队协作建议统一 `intellijIdea("2026.2.2")`。
 - UI 代码全部运行在 EDT；HTTP 请求在后台线程，回调通过 `invokeLater` 回到 EDT。
 - 新增持久化字段时，请给默认值并在 `SmartRequestState.normalize()` 中做兼容处理，避免旧 `.idea/smart-request.xml` 读取失败。
+
+---
+
+## 10. 参与贡献
+
+构建、测试、代码约定和 PR 流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+安全问题请走 [SECURITY.md](SECURITY.md) 里的私密报告渠道，不要开公开 Issue。
+
+## 11. License
+
+本项目基于 [Apache License 2.0](LICENSE) 开源，Copyright 2026 liuzhaowei。
+第三方商标说明见 [NOTICE](NOTICE)。
+
+## 12. 免责声明
+
+**使用前请阅读 [DISCLAIMER.md](DISCLAIMER.md)（完整版）。** 摘要：
+
+- 软件按 **“现状”** 提供，不提供任何明示或暗示的担保，也不承诺支持或 SLA，使用风险自负。
+- 插件会向你配置的 URL **真实发送 HTTP 请求**，可能创建、修改或删除服务端数据；
+  由此造成的任何损失（数据丢失、业务中断、被第三方追责等）作者不承担责任。
+- 环境变量、Token、请求体和请求历史以**明文**保存在 `.idea/smart-request.xml`，可能随 Git
+  提交或项目共享而泄露；这类泄露及其后果由使用者自行承担。插件本身不收集遥测数据，除你配置的
+  请求目标外不主动发起网络通信。
+- 本项目是独立第三方插件，与 JetBrains s.r.o. 无隶属或背书关系；IntelliJ IDEA、JetBrains 是
+  JetBrains s.r.o. 的商标，仅用于说明兼容性。
+- 请确保你对目标系统发起请求的行为已获授权，并遵守所在地法律和所在组织的安全规范。
