@@ -62,6 +62,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # `gh release` resolves the repository through git; without a checkout it fails with
+      # "failed to run git: fatal: not a git repository".
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download plugin zip
         uses: actions/download-artifact@v4
         with:
@@ -74,12 +79,13 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          if gh release view "$tag" >/dev/null 2>&1; then
+          repo="${GITHUB_REPOSITORY}"
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
             # Re-running the workflow for the same tag: replace the attached zip.
-            gh release upload "$tag" build/distributions/*.zip --clobber
+            gh release upload "$tag" build/distributions/*.zip --repo "$repo" --clobber
           else
             gh release create "$tag" build/distributions/*.zip \
+              --repo "$repo" \
               --title "$tag" \
-              --verify-tag \
               --generate-notes
           fi

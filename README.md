@@ -307,6 +307,7 @@ git push origin v1.0.2
 - Release 使用仓库自带的 `GITHUB_TOKEN`，无需额外配置 secret；`release` job 声明了 `contents: write` 权限。
 - 同一个 tag 重跑工作流时，会用 `gh release upload --clobber` 覆盖已有的 zip，不会因为 Release 已存在而失败。
 - 只有 `v*` 的 tag 会发 Release；普通 push/PR 只做构建检查。
+- 工作流文件也跟随 tag：改了 `.github/workflows/build.yml` 之后，需要把 tag 移到新提交（`git tag -f` + 强推）或者重新打一个 tag，旧 tag 的 workflow 还是旧的。
 - 测试不在 CI 里跑：UI 测试会真的开 Swing 窗口，需要虚拟显示，必要时用 `xvfb-run --auto-servernum ./gradlew test`。
 
 > **从 Fast Request 升级：** 插件 ID 从 `dev.fastrequest.idea` 改成了 `dev.smartrequest.idea`，IDEA 会把它当作一个新插件。请先在 `Settings → Plugins` 里卸载旧的 **Fast Request**，再安装这个 zip，否则会同时存在两个工具窗口。
