@@ -1,0 +1,132 @@
+package dev.smartrequest.http
+
+import dev.smartrequest.model.BodyType
+import dev.smartrequest.model.EnvironmentConfig
+import dev.smartrequest.model.HttpRequestConfig
+import dev.smartrequest.model.KeyValue
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class RequestPreparerTest {
+
+    private val environment = EnvironmentConfig().apply {
+        baseUrl = "http://localhost:8080"
+        variables.add(KeyValue.of("token", "secret"))
+    }
+
+    @Test
+    fun `request headers override globals`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/hello"
+            headers.add(KeyValue.of("Authorization", "Bearer request"))
+        }
+        val globals = listOf(
+            KeyValue.of("Authorization", "Bearer global"),
+            KeyValue.of("X-Tenant", "acme")
+        )
+
+        val prepared = RequestPreparer.prepare(request, environment, globals, emptyList(), 30_000, true)
+
+        assertEquals("Bearer request", header(prepared.request.headers, "Authorization"))
+        assertEquals("acme", header(prepared.request.headers, "X-Tenant"))
+    }
+
+    @Test
+    fun `request params override globals`() {
+        val requestParams = listOf(KeyValue.of("page", "2"))
+        val globalParams = listOf(KeyValue.of("page", "1"), KeyValue.of("tenant", "acme"))
+
+        val merged = RequestPreparer.mergeParameters(requestParams, globalParams)
+
+        assertEquals(listOf("page" to "2", "tenant" to "acme"), merged)
+    }
+
+    @Test
+    fun `path parameters are applied to the final url`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/users/{id}"
+            pathParams.add(KeyValue.of("id", "42"))
+        }
+
+        val prepared = RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+
+        assertEquals("http://localhost:8080/users/42", prepared.request.url)
+    }
+
+    @Test
+    fun `missing path parameter fails before the request is sent`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/users/{id}"
+        }
+
+        val error = assertThrows(RequestBuildException::class.java) {
+            RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+        }
+        assertTrue(error.message!!.contains("id"))
+    }
+
+    @Test
+    fun `resolves headers body and variables`() {
+        val request = HttpRequestConfig().apply {
+            method = "POST"
+            url = "{{baseUrl}}/users"
+            headers.add(KeyValue.of("Authorization", "Bearer {{token}}"))
+            bodyType = BodyType.JSON.name
+            body = """{"name":"{{token}}"}"""
+        }
+
+        val prepared = RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+
+        assertEquals("http://localhost:8080/users", prepared.request.url)
+        assertEquals("Bearer secret", header(prepared.request.headers, "Authorization"))
+        assertEquals("application/json; charset=UTF-8", header(prepared.request.headers, "Content-Type"))
+        assertEquals("""{"name":"secret"}""", prepared.request.body)
+    }
+
+    @Test
+    fun `no body means null body`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/hello"
+            bodyType = BodyType.NONE.name
+            body = "ignored"
+        }
+
+        val prepared = RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+
+        assertNull(prepared.request.body)
+    }
+
+    @Test
+    fun `unresolved variables fail before the request is sent`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/users/{{userId}}"
+        }
+
+        val error = assertThrows(RequestBuildException::class.java) {
+            RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+        }
+        assertTrue(error.message!!.contains("userId"))
+    }
+
+    @Test
+    fun `reserved headers are filtered`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/hello"
+            headers.add(KeyValue.of("Host", "evil.example"))
+            headers.add(KeyValue.of("Content-Length", "10"))
+            headers.add(KeyValue.of("X-Trace", "abc"))
+        }
+
+        val prepared = RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+
+        assertNull(header(prepared.request.headers, "Host"))
+        assertNull(header(prepared.request.headers, "Content-Length"))
+        assertEquals("abc", header(prepared.request.headers, "X-Trace"))
+    }
+
+    private fun header(headers: List<Pair<String, String>>, name: String): String? =
+        headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
+}

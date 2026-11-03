@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+build/
+out/
+.idea/
+*.iml
+.intellijPlatform/
+local.properties
+*.log
+.smoke-project/

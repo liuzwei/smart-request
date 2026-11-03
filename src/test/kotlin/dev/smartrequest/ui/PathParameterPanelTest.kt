@@ -1,0 +1,42 @@
+package dev.smartrequest.ui
+
+import com.intellij.testFramework.EdtTestUtil
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.util.ui.JBUI
+import dev.smartrequest.model.HttpRequestConfig
+
+class PathParameterPanelTest : BasePlatformTestCase() {
+
+    fun testNameAndValueColumnsSplitTheWidth() {
+        val widths = EdtTestUtil.runInEdtAndGet<List<Int>, RuntimeException> {
+            val panel = PathParameterPanel(variablesProvider = { emptyMap() })
+            panel.bind(HttpRequestConfig(url = "{{baseUrl}}/users/{id}"))
+            panel.computeColumnWidths(600)
+        }
+
+        assertEquals(2, widths.size)
+        assertEquals(600, widths.sum())
+        assertTrue("value column takes most of the row", widths[1] > widths[0] * 2)
+    }
+
+    fun testOnlyTheValueColumnIsEditable() {
+        val (nameStarted, valueStarted) = EdtTestUtil.runInEdtAndGet<Pair<Boolean, Boolean>, RuntimeException> {
+            val panel = PathParameterPanel(variablesProvider = { emptyMap() })
+            panel.bind(HttpRequestConfig(url = "{{baseUrl}}/users/{id}/orders/{orderId}"))
+            panel.beginEdit(0, 0) to panel.beginEdit(0, 1)
+        }
+
+        assertFalse(nameStarted)
+        assertTrue(valueStarted)
+    }
+
+    fun testPathParametersAreDetectedFromTheUrl() {
+        val count = EdtTestUtil.runInEdtAndGet<Int, RuntimeException> {
+            val panel = PathParameterPanel(variablesProvider = { emptyMap() })
+            panel.bind(HttpRequestConfig(url = "{{baseUrl}}/users/{id}/orders/{orderId}"))
+            panel.count()
+        }
+
+        assertEquals(2, count)
+    }
+}

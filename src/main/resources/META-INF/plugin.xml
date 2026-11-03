@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>dev.smartrequest.idea</id>
+    <name>Smart Request</name>
+    <vendor url="https://github.com/smart-request">smart-request</vendor>
+
+    <description><![CDATA[
+        <p>A lightweight HTTP client inside IntelliJ IDEA, built for quickly exercising Java and Spring controllers.</p>
+        <ul>
+            <li>Organize requests in groups with a project-level request tree, including moving requests between groups from the context menu.</li>
+            <li>Switch between environment profiles such as local, dev, test, and prod.</li>
+            <li>Resolve <code>{{variables}}</code> from the active environment, with highlighting and completion.</li>
+            <li>Support REST path parameters such as <code>/users/{id}</code> from a dedicated Path tab.</li>
+            <li>Edit header and query parameter rows with a single click, in a table whose key and value columns share a readable 3:4 layout.</li>
+            <li>Keep the URL query string and the Params table in sync in both directions.</li>
+            <li>Define global headers and query parameters that are applied to every request and locked in the request editor.</li>
+            <li>Keep request history and cache the last response for each request during the session.</li>
+            <li>Generate requests from gutter icons on Spring controllers and handler methods.</li>
+            <li>Generate editable JSON request bodies from DTO fields and Swagger field examples.</li>
+            <li>Copy any request as a Linux/macOS or PowerShell cURL command.</li>
+            <li>JSON response syntax highlighting, folding and in-body search.</li>
+            <li>Import Spring controller endpoints with one click.</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>com.intellij.modules.json</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+                id="Smart Request"
+                anchor="right"
+                icon="/icons/smartRequest.svg"
+                factoryClass="dev.smartrequest.ui.SmartRequestToolWindowFactory"/>
+        <notificationGroup
+                id="Smart Request"
+                displayType="BALLOON"/>
+        <codeInsight.lineMarkerProvider
+                language="JAVA"
+                implementationClass="dev.smartrequest.editor.SmartRequestLineMarkerProvider"/>
+    </extensions>
+
+    <actions>
+        <action
+                id="SmartRequest.OpenToolWindow"
+                class="dev.smartrequest.actions.OpenSmartRequestAction"
+                text="Smart Request"
+                description="Open the Smart Request HTTP client">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
