@@ -6,8 +6,8 @@ import dev.smartrequest.extract.ExtractionReport
 import dev.smartrequest.extract.ExtractionResult
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.ResponseExtractor
+import java.awt.Component
 import java.awt.Container
-import javax.swing.JComponent
 import javax.swing.JTabbedPane
 import javax.swing.JTable
 
@@ -69,17 +69,17 @@ class ExtractTabsUiTest : BasePlatformTestCase() {
         assertEquals("Extract (2)", title)
     }
 
-    private fun findTabs(component: JComponent): JTabbedPane? {
+    private fun findTabs(component: Component?): JTabbedPane? {
         if (component is JTabbedPane) return component
         if (component is Container) {
             component.components.forEach { child ->
-                (child as? JComponent)?.let { found -> findTabs(found)?.let { return it } }
+                findTabs(child)?.let { return it }
             }
         }
         return null
     }
 
-    private fun findTable(component: java.awt.Component?): JTable? {
+    private fun findTable(component: Component?): JTable? {
         if (component is JTable) return component
         if (component is Container) {
             component.components.forEach { child ->
