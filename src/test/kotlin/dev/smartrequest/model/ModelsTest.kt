@@ -2,6 +2,7 @@ package dev.smartrequest.model
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotSame
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ModelsTest {
@@ -60,5 +61,40 @@ class ModelsTest {
 
         assertEquals(1, request.extractors.size)
         assertEquals("token", request.extractors.single().variable)
+    }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun `project wide globals migrate into the active environment`() {
+        val state = SmartRequestState.createDefault()
+        val environment = state.environments.first()
+        environment.globalHeaders.add(KeyValue.of("X-Keep", "env"))
+        state.globalHeaders.add(KeyValue.of("Authorization", "Bearer old"))
+        state.globalHeaders.add(KeyValue.of("X-Keep", "legacy"))
+        state.globalParams.add(KeyValue.of("tenant", "acme"))
+
+        state.normalize()
+
+        assertTrue(state.globalHeaders.isEmpty())
+        assertTrue(state.globalParams.isEmpty())
+        assertEquals("Bearer old", environment.globalHeaders.first { it.key == "Authorization" }.value)
+        assertEquals(1, environment.globalHeaders.count { it.key == "X-Keep" })
+        assertEquals("env", environment.globalHeaders.first { it.key == "X-Keep" }.value)
+        assertEquals("acme", environment.globalParams.single().value)
+        assertEquals(2, state.version)
+    }
+
+    @Test
+    fun `environment deep copy keeps its own globals`() {
+        val environment = EnvironmentConfig().apply {
+            globalHeaders.add(KeyValue.of("Authorization", "Bearer env"))
+            globalParams.add(KeyValue.of("tenant", "acme"))
+        }
+
+        val copy = environment.deepCopy()
+
+        assertEquals("Bearer env", copy.globalHeaders.single().value)
+        assertEquals("tenant", copy.globalParams.single().key)
+        assertNotSame(environment.globalHeaders.first(), copy.globalHeaders.first())
     }
 }

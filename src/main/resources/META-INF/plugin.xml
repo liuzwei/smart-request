@@ -13,7 +13,7 @@
             <li>Support REST path parameters such as <code>/users/{id}</code> from a dedicated Path tab.</li>
             <li>Edit header and query parameter rows with a single click, in a table whose key and value columns share a readable 3:4 layout.</li>
             <li>Keep the URL query string and the Params table in sync in both directions.</li>
-            <li>Define global headers and query parameters that are applied to every request and locked in the request editor.</li>
+            <li>Define per-environment global headers and query parameters that are applied to every request and locked in the request editor.</li>
             <li>Keep request history and cache the last response for each request during the session.</li>
             <li>Generate requests from gutter icons on Spring controllers and handler methods.</li>
             <li>Generate editable JSON request bodies from DTO fields and Swagger field examples.</li>

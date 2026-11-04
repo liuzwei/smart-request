@@ -14,6 +14,7 @@ import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.EnvironmentConfig
+import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.KeyValueTablePanel
@@ -27,6 +28,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.JTabbedPane
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
@@ -42,6 +44,9 @@ class EnvironmentDialog(
     private val nameField = JBTextField()
     private val baseUrlField = JBTextField()
     private val variablesPanel = KeyValueTablePanel(showLegend = false)
+    private val globalHeadersPanel = KeyValueTablePanel(showLegend = false)
+    private val globalParamsPanel = KeyValueTablePanel(showLegend = false)
+    private val tabs = JTabbedPane()
     private val removeButton = JButton("Remove")
     private var selected: EnvironmentConfig? = null
     private var loading = true
@@ -96,24 +101,47 @@ class EnvironmentDialog(
         ).apply {
             foreground = UIUtil.getContextHelpForeground()
         }
+        val headersHint = JBLabel(
+            "Sent with every request in this environment; request-level headers win."
+        ).apply {
+            foreground = UIUtil.getContextHelpForeground()
+        }
+        val paramsHint = JBLabel(
+            "Added to every request URL in this environment; request-level params win."
+        ).apply {
+            foreground = UIUtil.getContextHelpForeground()
+        }
 
+        if (tabs.tabCount == 0) {
+            tabs.addTab("Variables", tableTab(variablesHint, variablesPanel))
+            tabs.addTab("Global Headers", tableTab(headersHint, globalHeadersPanel))
+            tabs.addTab("Global Params", tableTab(paramsHint, globalParamsPanel))
+        }
         val form = FormBuilder.createFormBuilder()
             .addLabeledComponent(JBLabel("Environment name").apply { font = font.deriveFont(Font.BOLD) }, nameField)
             .addLabeledComponent(JBLabel("Host address").apply { font = font.deriveFont(Font.BOLD) }, baseUrlField)
             .addVerticalGap(8)
-            .addComponent(JBLabel("Variables").apply { font = font.deriveFont(Font.BOLD) })
-            .addComponent(variablesHint)
-            .addComponentFillVertically(variablesPanel, 8)
+            .addComponentFillVertically(tabs, 8)
             .panel
         form.border = JBUI.Borders.emptyLeft(4)
 
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(10)
-            preferredSize = Dimension(JBUI.scale(820), JBUI.scale(520))
+            preferredSize = Dimension(JBUI.scale(860), JBUI.scale(560))
             add(left, BorderLayout.WEST)
             add(form, BorderLayout.CENTER)
         }
     }
+
+    private fun tableTab(hint: JBLabel, table: KeyValueTablePanel): JComponent =
+        JBPanel<JBPanel<*>>(BorderLayout(0, 6)).apply {
+            border = JBUI.Borders.empty(8, 6)
+            add(hint, BorderLayout.NORTH)
+            add(table, BorderLayout.CENTER)
+        }
+
+    /** Tab titles, used by tests to keep the order of the environment sections stable. */
+    internal fun tabTitles(): List<String> = (0 until tabs.tabCount).map { tabs.getTitleAt(it) }
 
     private fun loadSelected() {
         val environment = list.selectedValue
@@ -126,12 +154,16 @@ class EnvironmentDialog(
                 nameField.isEnabled = false
                 baseUrlField.isEnabled = false
                 variablesPanel.bind(mutableListOf())
+                globalHeadersPanel.bind(mutableListOf())
+                globalParamsPanel.bind(mutableListOf())
             } else {
                 nameField.isEnabled = true
                 baseUrlField.isEnabled = true
                 nameField.text = environment.name
                 baseUrlField.text = environment.baseUrl
                 variablesPanel.bind(environment.variables)
+                globalHeadersPanel.bind(environment.globalHeaders)
+                globalParamsPanel.bind(environment.globalParams)
             }
         } finally {
             loading = false
@@ -189,6 +221,8 @@ class EnvironmentDialog(
 
     override fun doValidate(): ValidationInfo? {
         variablesPanel.commitPendingEdit()
+        globalHeadersPanel.commitPendingEdit()
+        globalParamsPanel.commitPendingEdit()
         if (environments.isEmpty()) {
             return ValidationInfo("Add at least one environment", nameField)
         }
@@ -201,25 +235,44 @@ class EnvironmentDialog(
             return ValidationInfo("Environment name '${duplicate.value.first().name}' is duplicated", nameField)
         }
         environments.forEach { environment ->
-            val keys = environment.variables.filter { it.key.isNotBlank() }.map { it.key.trim() }
-            val duplicateKey = keys.groupingBy { it }.eachCount().entries.firstOrNull { it.value > 1 }
-            if (duplicateKey != null) {
+            duplicateKey(environment.variables)?.let {
                 return ValidationInfo(
-                    "Variable '${duplicateKey.key}' is duplicated in environment '${environment.name}'",
+                    "Variable '$it' is duplicated in environment '${environment.name}'",
                     variablesPanel
+                )
+            }
+            duplicateKey(environment.globalHeaders)?.let {
+                return ValidationInfo(
+                    "Global header '$it' is duplicated in environment '${environment.name}'",
+                    globalHeadersPanel
+                )
+            }
+            duplicateKey(environment.globalParams)?.let {
+                return ValidationInfo(
+                    "Global param '$it' is duplicated in environment '${environment.name}'",
+                    globalParamsPanel
                 )
             }
         }
         return null
     }
 
+    private fun duplicateKey(values: List<KeyValue>): String? {
+        val keys = values.filter { it.key.isNotBlank() }.map { it.key.trim().lowercase() }
+        return keys.groupingBy { it }.eachCount().entries.firstOrNull { it.value > 1 }?.key
+    }
+
     override fun doOKAction() {
         variablesPanel.commitPendingEdit()
+        globalHeadersPanel.commitPendingEdit()
+        globalParamsPanel.commitPendingEdit()
         if (environments.isEmpty()) return
         environments.forEach { environment ->
             environment.name = environment.name.trim()
             environment.baseUrl = environment.baseUrl.trim()
             environment.variables.removeIf { it.key.isBlank() }
+            environment.globalHeaders.removeIf { it.key.isBlank() }
+            environment.globalParams.removeIf { it.key.isBlank() }
             environment.normalize()
         }
         state.environments.clear()

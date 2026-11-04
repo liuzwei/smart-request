@@ -181,7 +181,9 @@ class SmartRequestPanel(
                 toolTipText = "Request history"
                 preferredSize = Dimension(JBUI.scale(30), JBUI.scale(28))
             })
-            add(flatButton("Globals", null) { openGlobalSettings() })
+            add(flatButton("Settings", null) { openGlobalSettings() }.apply {
+                toolTipText = "Request timeout and redirects"
+            })
             add(flatButton("Spring", null) { importSpringEndpoints(null) })
         }
         toolbar.add(left, BorderLayout.WEST)
@@ -260,7 +262,11 @@ class SmartRequestPanel(
     }
 
     private fun refreshGlobals() {
-        editorPanel.setGlobals(service.state().globalHeaders, service.state().globalParams)
+        val environment = service.activeEnvironment()
+        editorPanel.setGlobals(
+            environment?.globalHeaders.orEmpty(),
+            environment?.globalParams.orEmpty()
+        )
     }
 
     private fun openRequest(request: HttpRequestConfig) {
@@ -427,12 +433,13 @@ class SmartRequestPanel(
 
     private fun copyCurl(request: HttpRequestConfig, format: CurlFormat) {
         val state = service.state()
+        val environment = service.activeEnvironment()
         val prepared = try {
             RequestPreparer.prepare(
                 request = request,
-                environment = service.activeEnvironment(),
-                globalHeaders = state.globalHeaders,
-                globalParams = state.globalParams,
+                environment = environment,
+                globalHeaders = environment?.globalHeaders.orEmpty(),
+                globalParams = environment?.globalParams.orEmpty(),
                 timeoutMs = state.timeoutMs,
                 followRedirects = state.followRedirects
             )
@@ -497,12 +504,13 @@ class SmartRequestPanel(
             return
         }
         val state = service.state()
+        val environment = service.activeEnvironment()
         val prepared: PrepareResult = try {
             RequestPreparer.prepare(
                 request = request,
-                environment = service.activeEnvironment(),
-                globalHeaders = state.globalHeaders,
-                globalParams = state.globalParams,
+                environment = environment,
+                globalHeaders = environment?.globalHeaders.orEmpty(),
+                globalParams = environment?.globalParams.orEmpty(),
                 timeoutMs = state.timeoutMs,
                 followRedirects = state.followRedirects
             )

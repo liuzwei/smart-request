@@ -10,6 +10,7 @@ import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.RequestHistoryEntry
 import dev.smartrequest.model.ResponseExtractor
 import dev.smartrequest.service.SmartRequestProjectService
+import dev.smartrequest.ui.dialogs.EnvironmentDialog
 import dev.smartrequest.ui.dialogs.HistoryDialog
 
 /**
@@ -66,10 +67,23 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         }
     }
 
+    fun testEnvironmentDialogCanBeCreated() {
+        val service = project.service<SmartRequestProjectService>()
+        val (dialog, tabs) = EdtTestUtil.runInEdtAndGet<Pair<EnvironmentDialog, List<String>>, RuntimeException> {
+            val created = EnvironmentDialog(project, service.state(), service)
+            created to created.tabTitles()
+        }
+        assertNotNull(dialog)
+        assertEquals(listOf("Variables", "Global Headers", "Global Params"), tabs)
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            dialog.disposeIfNeeded()
+        }
+    }
+
     fun testStateRoundTripsThroughXmlSerializer() {
         val state = SmartRequestState.createDefault().apply {
-            globalHeaders.add(KeyValue.of("Authorization", "Bearer test"))
-            globalParams.add(KeyValue.of("tenant", "acme"))
+            environments.first().globalHeaders.add(KeyValue.of("Authorization", "Bearer test"))
+            environments.first().globalParams.add(KeyValue.of("tenant", "acme"))
             groups.first().requests.first().headers.add(KeyValue.of("X-Test", "yes"))
             groups.first().requests.first().pathParams.add(KeyValue.of("id", "42"))
             groups.first().requests.first().extractors.add(
@@ -93,8 +107,9 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         val element = XmlSerializer.serialize(state)
         val restored = XmlSerializer.deserialize(element, SmartRequestState::class.java)
 
-        assertEquals("Bearer test", restored.globalHeaders.first().value)
-        assertEquals("tenant", restored.globalParams.first().key)
+        val restoredEnvironment = restored.environments.first()
+        assertEquals("Bearer test", restoredEnvironment.globalHeaders.first().value)
+        assertEquals("tenant", restoredEnvironment.globalParams.first().key)
         assertEquals("X-Test", restored.groups.first().requests.first().headers.first().key)
         assertEquals("42", restored.groups.first().requests.first().pathParams.first().value)
         val restoredExtractor = restored.groups.first().requests.first().extractors.first()

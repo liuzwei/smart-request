@@ -135,6 +135,7 @@
   - 环境名称
   - Host Address（即 `baseUrl`）
   - 任意数量的变量，例如 `token`、`tenantCode`、`userId`
+  - 该环境专用的全局 Header 和全局 Query Param（`Global Headers` / `Global Params` 页签）
 - 顶部工具栏切换环境，立即影响下一次请求。
 - 环境变量支持递归解析，例如：
   ```text
@@ -145,16 +146,19 @@
   请求里写 `{{users}}` 会解析成 `http://localhost:8080/api/users`。
 - `{{baseUrl}}` 会自动去掉末尾 `/`，避免拼出 `//api`。
 
-### 全局 Header 和全局 Params（锁定）
+### 全局 Header 和全局 Params（按环境，锁定）
 
-- Global Settings 中维护全局 Header 和全局 Query Param。
+- 全局 Header / 全局 Query Param 是**环境级**的：在 `Environments` 对话框里，选中某个环境后，用
+  `Global Headers` / `Global Params` 两个页签维护。`local` 可以不带 Token，`dev` 带测试 Token，
+  `prod` 带另一套租户头，切换环境时自动生效。
 - 全局 Header 适合放 `Authorization`、`Token`、`X-Tenant-Code` 等。
 - 全局 Param 会追加到每个请求的 URL 查询参数中。
-- 在请求编辑器的 Params / Headers 表格里，全局行以灰色斜体显示，来源列标记为 `Global`，不可编辑、不可删除。
+- 在请求编辑器的 Params / Headers 表格里，当前环境的全局行以灰色斜体显示、不可编辑、不可删除。
 - 同名时请求级参数优先：
   - 请求 Header `Authorization` 覆盖全局 `Authorization`。
   - 请求 Param `page=2` 覆盖全局 `page=1`。
-- 全局设置还包含请求超时（默认 30s）和是否跟随重定向。
+- 请求超时（默认 30s）和是否跟随重定向仍然是项目级设置，在工具栏 `Settings` 里修改。
+- 从旧版本升级时，原来的项目级全局 Header/Params 会一次性迁移到当时活动的环境，不会丢失。
 
 ### 参数表格输入体验
 
@@ -167,7 +171,7 @@ Params / Headers / Path Params 共用同一套表格交互：
 - 输入过程中每个字符都会写回模型，即使编辑器被别的事件打断，已输入的内容也不会丢失。
 - 单击最左侧勾选框即可启用/禁用该行，不需要双击。
 - 有内容的单元格悬停显示完整文本，长 Token 不进编辑态也能看全。
-- 全局行（来自 Global Settings）显示为灰色斜体、不可编辑，悬停会提示去 Global Settings 修改。
+- 当前环境的全局行显示为灰色斜体、不可编辑，悬停会提示去 `Environments` 修改。
 - 窄窗口下按列的最小宽度收缩，不会把某一列压成 0。
 - Path Params 表格按 `3 : 7` 分配，只有值列可编辑。
 
@@ -259,7 +263,7 @@ Java Controller 的**类名**和带 Mapping 注解的**方法名**左侧会显�
 .idea/smart-request.xml
 ```
 
-包含环境、全局 Header/Params、分组和全部请求，以及最近 100 条请求历史。适合跟着项目一起提交到 Git。
+包含环境（含每个环境自己的全局 Header/Params）、分组和全部请求，以及最近 100 条请求历史。适合跟着项目一起提交到 Git。
 
 > 注意：环境变量、Header 和请求历史快照目前都是明文存储，历史快照可能包含 Token/Body。生产 token 不建议直接提交；后续计划接入 IntelliJ `PasswordSafe`。
 
@@ -367,12 +371,13 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（167 个）：
+当前测试覆盖（170 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
 - 路径参数的识别、替换、路径段编码、缺失/空值校验
 - 全局/请求 Header、Params 合并
+- 环境级全局 Header/Params：每个环境各自维护、切环境生效、旧版项目级全局的迁移
 - 请求体 Content-Type 与变量解析
 - JSON 格式化
 - 响应提取：JSON 路径求值（嵌套、下标、负下标、括号 key、null、缺失、非 JSON、大整数精度）、提取引擎（新增/更新/重新启用/失败不覆盖/headers/status/派生变量名）、两个 Tab 的计数与结果展示
@@ -386,7 +391,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 类/方法 Gutter 图标存在性
 - Controller 分组导入的创建、幂等更新、保留用户已填值
 - 真实本地 HTTP Server 的 GET/POST、gzip 解压、错误状态码
-- `.idea/smart-request.xml` 对应模型（含 Path 参数、History 快照）的 XmlSerializer 往返测试
+- `.idea/smart-request.xml` 对应模型（含 Path 参数、History 快照、环境级全局 Header/Params）的 XmlSerializer 往返测试
 - 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
 - 请求右键菜单 `Move to Group` 的子菜单内容与回调
 - 变量高亮、Path 参数自动同步
@@ -397,7 +402,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - Query 字符串工具：解析/编码/解码、重复 key、无值 key、fragment、`{{变量}}` 不被编码、往返一致
 - Path Params 表格的 3:7 列宽、只有值列可编辑、从 URL 识别参数
 - 切换请求时变量输入框文本替换的边界回归测试
-- 在真实 IntelliJ 项目中创建并销毁整个工具窗口与 History 对话框的 UI smoke test
+- 在真实 IntelliJ 项目中创建并销毁整个工具窗口、History 对话框和 Environments 对话框的 UI smoke test
 
 ---
 
@@ -484,7 +489,7 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 3. 单击同一行的 Value 单元格输入参数值。
 4. 单击行首勾选框可以临时禁用某一行，禁用的行不会发送，也不需要删除。
 5. 点 `+` 新增一行并自动进入 Key 编辑；选中行后点 `−` 删除。
-6. 灰色斜体行是全局参数，鼠标悬停可看到完整值，需要到 `Global Settings` 修改。
+6. 灰色斜体行是当前环境的全局参数，鼠标悬停可看到完整值，需要到 `Environments` 对应环境的 `Global Headers` / `Global Params` 页签修改。
 
 ### URL 和 Params 怎么配合
 
@@ -544,7 +549,7 @@ src/main/kotlin/dev/smartrequest/
 │   ├── TableLayout.kt       # 表格列宽比例分配与单击编辑
 │   ├── VariableTextSupport.kt# 变量高亮与补全
 │   ├── VariableHtml.kt      # 表格变量高亮
-│   └── dialogs/             # 环境设置、全局设置、历史记录
+│   └── dialogs/             # 环境设置（变量/全局头/全局参数）、请求设置、历史记录
 └── util/JsonPrettyPrinter.kt# 无依赖 JSON 格式化
 ```
 
@@ -560,8 +565,9 @@ src/main/kotlin/dev/smartrequest/
    - 降低插件体积和依赖冲突风险。
    - JDK HttpClient 足够覆盖当前场景；复杂场景（HTTP/2、代理、Cookie、multipart）后续再评估。
 
-3. **全局参数锁定在请求编辑器中**
-   - 防止成员误改统一租户头/Token。
+3. **全局参数按环境存放，并锁定在请求编辑器中**
+   - 同一套租户头/Token 在 local、dev、prod 通常不同，放在环境里切环境就自动换，不需要来回改。
+   - 防止成员误改统一租户头/Token：请求编辑器里只读，只能在 `Environments` 里改。
    - 请求级同名参数仍然允许覆盖，符合“统一默认 + 局部特例”的使用习惯。
 
 4. **Spring 导入是“更新式”的**

@@ -10,8 +10,19 @@ class SmartRequestState {
     var version: Int = 1
     var environments: MutableList<EnvironmentConfig> = mutableListOf()
     var activeEnvironmentId: String? = null
+
+    /**
+     * Project-wide globals used before they moved into [EnvironmentConfig]. They are read only to
+     * migrate old `.idea/smart-request.xml` files into the active environment and are empty after
+     * that; new writes always go to the environment.
+     */
+    @Deprecated("Moved to EnvironmentConfig.globalHeaders")
     var globalHeaders: MutableList<KeyValue> = mutableListOf()
+
+    /** @see globalHeaders */
+    @Deprecated("Moved to EnvironmentConfig.globalParams")
     var globalParams: MutableList<KeyValue> = mutableListOf()
+
     var groups: MutableList<RequestGroup> = mutableListOf()
     var history: MutableList<RequestHistoryEntry> = mutableListOf()
     var timeoutMs: Int = DEFAULT_TIMEOUT_MS
@@ -19,7 +30,6 @@ class SmartRequestState {
 
     fun normalize() {
         if (version < 1) version = 1
-        if (timeoutMs !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) timeoutMs = DEFAULT_TIMEOUT_MS
 
         if (environments.isEmpty()) {
             environments.add(EnvironmentConfig(name = "local", baseUrl = "http://localhost:8080"))
@@ -29,12 +39,37 @@ class SmartRequestState {
             activeEnvironmentId = environments.first().id
         }
 
+        // Project-wide globals from older versions belong to whichever environment was active.
+        migrateLegacyGlobals()
+        if (version < 2) version = 2
+        if (timeoutMs !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) timeoutMs = DEFAULT_TIMEOUT_MS
+
         if (groups.isEmpty()) {
             groups.add(RequestGroup(name = "My Requests"))
         }
         groups.forEach { it.normalize() }
         if (history.size > MAX_HISTORY) {
             history = history.take(MAX_HISTORY).toMutableList()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun migrateLegacyGlobals() {
+        if (globalHeaders.isEmpty() && globalParams.isEmpty()) return
+        val environment = activeEnvironment() ?: return
+        mergeMissing(environment.globalHeaders, globalHeaders)
+        mergeMissing(environment.globalParams, globalParams)
+        globalHeaders.clear()
+        globalParams.clear()
+    }
+
+    private fun mergeMissing(target: MutableList<KeyValue>, source: List<KeyValue>) {
+        val existing = target.map { it.key.trim().lowercase() }.toSet()
+        source.forEach { value ->
+            val key = value.key.trim()
+            if (key.isNotEmpty() && key.lowercase() !in existing) {
+                target.add(value.deepCopy())
+            }
         }
     }
 
@@ -69,13 +104,15 @@ class EnvironmentConfig(
     var id: String = UUID.randomUUID().toString(),
     var name: String = "local",
     var baseUrl: String = "http://localhost:8080",
-    var variables: MutableList<KeyValue> = mutableListOf()
+    var variables: MutableList<KeyValue> = mutableListOf(),
+    var globalHeaders: MutableList<KeyValue> = mutableListOf(),
+    var globalParams: MutableList<KeyValue> = mutableListOf()
 ) {
     fun normalize() {
         if (name.isBlank()) name = "environment"
-        if (variables.any { it.key.isBlank() && it.value.isNotBlank() }) {
-            variables.removeAll { it.key.isBlank() && it.value.isNotBlank() }
-        }
+        variables.removeAll { it.key.isBlank() && it.value.isNotBlank() }
+        globalHeaders.removeAll { it.key.isBlank() && it.value.isNotBlank() }
+        globalParams.removeAll { it.key.isBlank() && it.value.isNotBlank() }
     }
 
     fun deepCopy(): EnvironmentConfig = EnvironmentConfig().also { copy ->
@@ -83,6 +120,8 @@ class EnvironmentConfig(
         copy.name = name
         copy.baseUrl = baseUrl
         copy.variables = variables.map { it.deepCopy() }.toMutableList()
+        copy.globalHeaders = globalHeaders.map { it.deepCopy() }.toMutableList()
+        copy.globalParams = globalParams.map { it.deepCopy() }.toMutableList()
     }
 }
 

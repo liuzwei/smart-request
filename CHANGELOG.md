@@ -23,6 +23,10 @@
 ### Changed
 
 - 插件 vendor 信息更新为 `liuzhaowei`，并补充仓库地址。
+- 全局 Header 和全局 Params 从项目级迁移到**环境级**：在 `Environments` 对话框新增 `Global Headers` /
+  `Global Params` 页签（`Variables` 之后），每个环境各自维护，切换环境即生效。
+  - 旧版本 `.idea/smart-request.xml` 里的项目级全局会一次性迁移到当时活动的环境，不会丢失。
+  - 请求超时和是否跟随重定向仍为项目级设置，入口由 `Globals` 改为 `Settings`。
 
 ### Fixed
 
