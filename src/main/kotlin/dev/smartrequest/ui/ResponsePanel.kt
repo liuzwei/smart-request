@@ -19,6 +19,8 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import dev.smartrequest.extract.ExtractionReport
+import dev.smartrequest.extract.ExtractionResult
 import dev.smartrequest.http.HttpResponseData
 import dev.smartrequest.http.HttpTransport
 import dev.smartrequest.util.JsonPrettyPrinter
@@ -36,15 +38,18 @@ import java.util.Locale
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComponent
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTabbedPane
+import javax.swing.JTable
 import javax.swing.ListSelectionModel
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
+import javax.swing.table.TableCellRenderer
 
 class ResponsePanel(
     private val project: Project
@@ -145,6 +150,21 @@ class ResponsePanel(
     private var currentMatch = -1
     private val searchHighlighters = ArrayList<RangeHighlighter>()
     private val manualFoldRegions = ArrayList<com.intellij.openapi.editor.FoldRegion>()
+    private val extractionModel = ExtractionModel()
+    private val extractionTable = JBTable(extractionModel).apply {
+        rowHeight = JBUI.scale(24)
+        autoResizeMode = JBTable.AUTO_RESIZE_LAST_COLUMN
+        setShowGrid(false)
+        intercellSpacing = Dimension(0, 0)
+        selectionModel.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        columnModel.getColumn(0).preferredWidth = JBUI.scale(200)
+        columnModel.getColumn(1).preferredWidth = JBUI.scale(440)
+        columnModel.getColumn(2).preferredWidth = JBUI.scale(160)
+        setDefaultRenderer(String::class.java, ExtractionCellRenderer())
+    }
+    private val extractionHint = JBLabel(NO_EXTRACT_HINT).apply {
+        foreground = UIUtil.getContextHelpForeground()
+    }
     private var searchDispatcherInstalled = false
     private val searchKeyDispatcher = KeyEventDispatcher { event ->
         val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
@@ -233,7 +253,33 @@ class ResponsePanel(
         tabs.addTab("Headers (0)", JBScrollPane(headersTable).apply {
             border = JBUI.Borders.customLine(JBColor.border())
         })
+        tabs.addTab("Variables (0)", JBPanel<JBPanel<*>>(BorderLayout(0, 4)).apply {
+            border = JBUI.Borders.emptyTop(4)
+            add(extractionHint, BorderLayout.NORTH)
+            add(JBScrollPane(extractionTable).apply {
+                border = JBUI.Borders.customLine(JBColor.border())
+            }, BorderLayout.CENTER)
+        })
         return tabs
+    }
+
+    /**
+     * Shows what the Extract rules of the request that produced this response captured. This tab is
+     * read-only on purpose: the rules themselves belong to the request and are edited in the Extract
+     * tab of the request editor.
+     */
+    fun setExtractionReport(report: ExtractionReport?) {
+        val results = report?.results.orEmpty()
+        extractionModel.setRows(results)
+        if (tabs.tabCount > VARIABLES_TAB) {
+            tabs.setTitleAt(VARIABLES_TAB, "Variables (${results.size})")
+        }
+        extractionHint.text = when {
+            report == null -> NO_EXTRACT_HINT
+            results.isEmpty() -> "No value was extracted from this response."
+            report.failureCount > 0 -> "${report.successCount} captured, ${report.failureCount} failed."
+            else -> "${results.size} value(s) written to the active environment."
+        }
     }
 
     private fun installEditorShortcuts() {
@@ -259,6 +305,7 @@ class ResponsePanel(
         copyButton.isEnabled = false
         headersModel.setRows(emptyList())
         tabs.setTitleAt(1, "Headers (0)")
+        setExtractionReport(null)
         tabs.selectedIndex = 0
         hideSearch()
         foldButton.isEnabled = false
@@ -276,6 +323,7 @@ class ResponsePanel(
         copyButton.isEnabled = false
         headersModel.setRows(emptyList())
         tabs.setTitleAt(1, "Headers (0)")
+        setExtractionReport(null)
         tabs.selectedIndex = 0
         hideSearch()
         foldButton.isEnabled = false
@@ -284,6 +332,7 @@ class ResponsePanel(
 
     fun show(response: HttpResponseData) {
         lastResponse = response
+        setExtractionReport(null)
         statusLabel.text = buildString {
             append(response.statusCode)
             if (response.statusText.isNotEmpty()) append(' ').append(response.statusText)
@@ -321,6 +370,7 @@ class ResponsePanel(
         copyButton.isEnabled = true
         headersModel.setRows(emptyList())
         tabs.setTitleAt(1, "Headers (0)")
+        setExtractionReport(null)
         wrapCheck.isSelected = true
         setBodyText(message, json = false)
         tabs.selectedIndex = 0
@@ -340,6 +390,7 @@ class ResponsePanel(
         setBodyText("Request cancelled.", json = false)
         headersModel.setRows(emptyList())
         tabs.setTitleAt(1, "Headers (0)")
+        setExtractionReport(null)
         tabs.selectedIndex = 0
         hideSearch()
         foldButton.isEnabled = false
@@ -618,6 +669,89 @@ class ResponsePanel(
         else -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
     }
 
+    private class ExtractionModel : AbstractTableModel() {
+        private var rows: List<ExtractionResult> = emptyList()
+
+        fun setRows(newRows: List<ExtractionResult>) {
+            rows = newRows
+            fireTableDataChanged()
+        }
+
+        fun rowAt(index: Int): ExtractionResult? = rows.getOrNull(index)
+
+        override fun getRowCount(): Int = rows.size
+        override fun getColumnCount(): Int = 3
+        override fun getColumnName(column: Int): String = when (column) {
+            0 -> "Variable"
+            1 -> "Value"
+            else -> "Result"
+        }
+
+        // Needed for the custom renderer to be picked up: without it JTable falls back to the
+        // Object renderer and the failure reason would be replaced by a bare "Failed".
+        override fun getColumnClass(columnIndex: Int): Class<*> = String::class.java
+
+        override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
+            val result = rows.getOrNull(rowIndex) ?: return ""
+            return when (columnIndex) {
+                0 -> result.variable
+                1 -> result.value.orEmpty()
+                else -> if (result.successful) (if (result.added) "Added" else "Updated") else "Failed"
+            }
+        }
+
+        override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = false
+    }
+
+    private inner class ExtractionCellRenderer : JLabel(), TableCellRenderer {
+        init {
+            isOpaque = true
+            border = JBUI.Borders.empty(0, 8)
+        }
+
+        override fun getTableCellRendererComponent(
+            table: JTable,
+            value: Any?,
+            selected: Boolean,
+            hasFocus: Boolean,
+            row: Int,
+            column: Int
+        ): Component {
+            val result = extractionModel.rowAt(row)
+            background = if (selected) table.selectionBackground else table.background
+            if (result == null) {
+                text = ""
+                toolTipText = null
+                return this
+            }
+            foreground = when {
+                selected -> table.selectionForeground
+                !result.successful -> ERROR_COLOR
+                column == 2 -> SUCCESS_COLOR
+                else -> table.foreground
+            }
+            text = when {
+                column == 0 -> result.variable
+                column == 1 -> result.value.orEmpty()
+                result.successful -> if (result.added) "Added" else "Updated"
+                else -> result.error.orEmpty()
+            }
+            toolTipText = when (column) {
+                0 -> result.source
+                1 -> result.value
+                else -> if (result.successful) {
+                    buildString {
+                        append(if (result.added) "Added to the environment" else "Updated in the environment")
+                        result.previous?.takeIf { it != result.value }?.let { append("\nwas: ").append(it) }
+                    }
+                } else {
+                    result.error
+                }
+            }
+            return this
+        }
+    }
+
     private class HeadersModel : AbstractTableModel() {
         private var rows: List<Pair<String, String>> = emptyList()
 
@@ -638,6 +772,9 @@ class ResponsePanel(
     companion object {
         private const val MAX_SEARCH_MATCHES = 500
         private const val MIN_FOLD_LENGTH = 8
+        private const val VARIABLES_TAB = 2
+        private const val NO_EXTRACT_HINT =
+            "Add rules in the Extract tab of the request to capture values from a response."
         private val SEARCH_HIGHLIGHT = JBColor(0xFFF3B0, 0x4A452A)
         private val SUCCESS_COLOR = JBColor(0x1A7F37, 0x73BD79)
         private val INFO_COLOR = JBColor(0x0B5CAD, 0x6BA6E8)

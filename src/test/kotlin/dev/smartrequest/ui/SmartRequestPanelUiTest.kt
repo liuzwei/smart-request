@@ -8,6 +8,7 @@ import com.intellij.util.xmlb.XmlSerializer
 import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.RequestHistoryEntry
+import dev.smartrequest.model.ResponseExtractor
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.dialogs.HistoryDialog
 
@@ -71,6 +72,9 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
             globalParams.add(KeyValue.of("tenant", "acme"))
             groups.first().requests.first().headers.add(KeyValue.of("X-Test", "yes"))
             groups.first().requests.first().pathParams.add(KeyValue.of("id", "42"))
+            groups.first().requests.first().extractors.add(
+                ResponseExtractor(variable = "token", source = "data.token")
+            )
             history.add(
                 RequestHistoryEntry(
                     timestamp = 1_700_000_000_000,
@@ -93,6 +97,10 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals("tenant", restored.globalParams.first().key)
         assertEquals("X-Test", restored.groups.first().requests.first().headers.first().key)
         assertEquals("42", restored.groups.first().requests.first().pathParams.first().value)
+        val restoredExtractor = restored.groups.first().requests.first().extractors.first()
+        assertEquals("token", restoredExtractor.variable)
+        assertEquals("data.token", restoredExtractor.source)
+        assertEquals(true, restoredExtractor.enabled)
         assertEquals(1, restored.history.size)
         assertEquals(200, restored.history.first().statusCode)
         assertEquals("42", restored.history.first().request.pathParams.first().value)

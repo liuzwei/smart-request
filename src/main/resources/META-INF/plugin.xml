@@ -19,6 +19,7 @@
             <li>Generate editable JSON request bodies from DTO fields and Swagger field examples.</li>
             <li>Copy any request as a Linux/macOS or PowerShell cURL command.</li>
             <li>JSON response syntax highlighting, folding and in-body search.</li>
+            <li>Capture response values into environment variables from the Extract tab (<code>data.token</code>, <code>data.items[0].id</code>, <code>headers.X-Request-Id</code>, <code>status</code>) and reuse them as <code>{{variables}}</code> in later requests.</li>
             <li>Import Spring controller endpoints with one click.</li>
         </ul>
     ]]></description>

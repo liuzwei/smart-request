@@ -18,6 +18,9 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import dev.smartrequest.extract.ExtractedValue
+import dev.smartrequest.extract.ExtractionReport
+import dev.smartrequest.extract.ResponseExtractorEngine
 import dev.smartrequest.http.CurlCommandBuilder
 import dev.smartrequest.http.CurlFormat
 import dev.smartrequest.http.HttpResponseData
@@ -99,7 +102,8 @@ class SmartRequestPanel(
             onSend = { sendRequest(it) },
             onCancel = { cancelRequest() },
             onNameChanged = { treePanel.repaintTree() },
-            variablesProvider = { VariableResolver.environmentVariables(service.activeEnvironment()) }
+            variablesProvider = { VariableResolver.environmentVariables(service.activeEnvironment()) },
+            onRunExtract = { runExtractionForCurrentRequest() }
         )
         emptyPanel = buildEmptyPanel()
         editorCards.add(emptyPanel, CARD_EMPTY)
@@ -267,6 +271,7 @@ class SmartRequestPanel(
         if (activeSendId == request.id) {
             editorPanel.setSending(true)
             responsePanel.showLoading()
+            editorPanel.setExtractionReport(null)
         } else {
             editorPanel.setSending(false)
             showCachedResponse(request.id)
@@ -277,18 +282,27 @@ class SmartRequestPanel(
         val cached = responseCache[requestId]
         if (cached == null || (cached.response == null && cached.error == null)) {
             responsePanel.showEmptyState()
+            editorPanel.setExtractionReport(null)
             return
         }
         if (cached.response != null) {
             responsePanel.show(cached.response)
+            responsePanel.setExtractionReport(cached.report)
+            editorPanel.setExtractionReport(cached.report)
         } else {
             responsePanel.showError(cached.error ?: "Request failed")
+            editorPanel.setExtractionReport(cached.report)
         }
     }
 
-    private fun cacheResponse(requestId: String, response: HttpResponseData?, error: String?) {
+    private fun cacheResponse(
+        requestId: String,
+        response: HttpResponseData?,
+        error: String?,
+        report: ExtractionReport? = null
+    ) {
         responseCache.remove(requestId)
-        responseCache[requestId] = CachedResponse(response, error)
+        responseCache[requestId] = CachedResponse(response, error, report)
         while (responseCache.size > RESPONSE_CACHE_SIZE) {
             val oldest = responseCache.keys.firstOrNull() ?: break
             responseCache.remove(oldest)
@@ -505,6 +519,10 @@ class SmartRequestPanel(
         val startedAt = System.currentTimeMillis()
         val requestSnapshot = request.deepCopy()
         val environmentName = service.activeEnvironment()?.name.orEmpty()
+        // The values are written to the environment that was active when the request was sent, even
+        // if the user switches environments while the request is still running.
+        val environmentId = service.activeEnvironment()?.id
+        val extractorsSnapshot = request.extractors.map { it.deepCopy() }
         responseCache.remove(request.id)
         editorPanel.setSending(true)
         editorPanel.setStatusWarning(null)
@@ -520,6 +538,13 @@ class SmartRequestPanel(
         inFlight = future
         activeSendId = request.id
         future.whenComplete { response, error ->
+            // Extraction is pure and runs off the UI thread; the write-back happens below.
+            val extracted = if (error == null && response != null) {
+                runCatching { ResponseExtractorEngine.extract(response, extractorsSnapshot) }
+                    .getOrElse { emptyList() }
+            } else {
+                emptyList()
+            }
             ApplicationManager.getApplication().invokeLater {
                 if (inFlight !== future) return@invokeLater
                 inFlight = null
@@ -548,6 +573,7 @@ class SmartRequestPanel(
                     if (isCurrent) {
                         editorPanel.setStatusWarning(message)
                         responsePanel.showError(fullMessage)
+                        editorPanel.setExtractionReport(null)
                     }
                     recordHistory(
                         requestSnapshot,
@@ -558,9 +584,12 @@ class SmartRequestPanel(
                         durationMs = System.currentTimeMillis() - startedAt
                     )
                 } else if (response != null) {
-                    cacheResponse(request.id, response, null)
+                    val report = if (extracted.isEmpty()) null else applyExtractedValues(environmentId, extracted)
+                    cacheResponse(request.id, response, null, report)
                     if (isCurrent) {
                         responsePanel.show(response)
+                        responsePanel.setExtractionReport(report)
+                        editorPanel.setExtractionReport(report)
                         if (!response.successful) {
                             editorPanel.setStatusWarning("HTTP ${response.statusCode} ${response.statusText}".trim())
                         }
@@ -576,6 +605,52 @@ class SmartRequestPanel(
                 }
             }
         }
+    }
+
+    /**
+     * Writes the values captured from [extracted] into [environmentId] (or the active environment
+     * when that one is gone) and reports what changed. Must run on the UI thread because it mutates
+     * project state and notifies the listeners.
+     */
+    private fun applyExtractedValues(
+        environmentId: String?,
+        extracted: List<ExtractedValue>
+    ): ExtractionReport {
+        if (extracted.isEmpty()) return ExtractionReport.EMPTY
+        val environment = service.state().environments.firstOrNull { it.id == environmentId }
+            ?: service.activeEnvironment()
+        val report = ResponseExtractorEngine.apply(environment, extracted)
+        if (report.successCount > 0) service.notifyChanged()
+        return report
+    }
+
+    /** Runs the Extract rules of the open request against its cached response. */
+    private fun runExtractionForCurrentRequest() {
+        val request = currentRequest ?: return
+        if (request.extractors.none { it.enabled && !it.isBlank() }) {
+            editorPanel.setStatusWarning("Add at least one Extract rule first.")
+            return
+        }
+        val response = responseCache[request.id]?.response
+        if (response == null) {
+            editorPanel.setStatusWarning("Send the request once, then the rules can run against that response.")
+            return
+        }
+        val report = try {
+            applyExtractedValues(
+                service.activeEnvironment()?.id,
+                ResponseExtractorEngine.extract(response, request.extractors.toList())
+            )
+        } catch (e: Exception) {
+            editorPanel.setStatusWarning(e.message ?: "Extract failed.")
+            return
+        }
+        cacheResponse(request.id, response, null, report)
+        responsePanel.setExtractionReport(report)
+        editorPanel.setExtractionReport(report)
+        editorPanel.setStatusWarning(
+            if (report.failureCount > 0) "${report.failureCount} Extract rule(s) failed." else null
+        )
     }
 
     private fun recordHistory(
@@ -706,7 +781,8 @@ class SmartRequestPanel(
 
     private data class CachedResponse(
         val response: HttpResponseData?,
-        val error: String?
+        val error: String?,
+        val report: ExtractionReport? = null
     )
 
     companion object {

@@ -20,6 +20,8 @@
 - 环境变量、Global Header（例如 `Authorization`、Token）、请求 Body、请求历史快照会以**明文**
   保存在项目目录的 `.idea/smart-request.xml` 中。该文件可能被提交到 Git、随项目共享、被打包备份
   或同步到云端。
+- 通过 `Extract` 功能从响应中提取并写入环境变量的值（例如登录返回的 Token）同样以明文形式
+  保存在上述文件中，并且会随着每次请求被自动更新。
 - 把该文件纳入版本控制、发给他人、截图、贴日志或上传工单时，可能泄露 Token、Cookie、内网地址等
   敏感信息。这类泄露及其后果由使用者自行承担，作者及贡献者不承担责任。
 - 插件本身不收集、不上传遥测数据，除了你配置的请求目标之外不会主动发起网络通信；
@@ -51,8 +53,9 @@ and the authors are **not liable** for any damages or losses arising from its us
 
 The plugin sends real HTTP requests to the endpoints you configure. Environment variables,
 tokens, request bodies and history snapshots are stored **in plain text** in
-`.idea/smart-request.xml`; if you commit, share or publish that file, you are responsible
-for any resulting credential or data leakage.
+`.idea/smart-request.xml`; values captured from responses by the `Extract` feature are written
+there too. If you commit, share or publish that file, you are responsible for any resulting
+credential or data leakage.
 
 This is an independent third-party plugin and is not affiliated with or endorsed by
 JetBrains s.r.o. IntelliJ IDEA is a trademark of JetBrains s.r.o.

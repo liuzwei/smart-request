@@ -8,6 +8,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import dev.smartrequest.extract.ExtractionReport
 import dev.smartrequest.http.QueryParams
 import dev.smartrequest.model.BodyType
 import dev.smartrequest.model.HttpRequestConfig
@@ -39,7 +40,8 @@ class RequestEditorPanel(
     private val onSend: (HttpRequestConfig) -> Unit,
     private val onCancel: () -> Unit,
     private val onNameChanged: () -> Unit,
-    private val variablesProvider: () -> Map<String, String>
+    private val variablesProvider: () -> Map<String, String>,
+    private val onRunExtract: () -> Unit = {}
 ) : JBPanel<RequestEditorPanel>(BorderLayout()) {
 
     private var current: HttpRequestConfig? = null
@@ -84,6 +86,10 @@ class RequestEditorPanel(
     private val headersPanel = KeyValueTablePanel(
         onChanged = { updateTabTitles() },
         variablesProvider = variablesProvider
+    )
+    private val extractorsPanel: ExtractorTablePanel = ExtractorTablePanel(
+        onChanged = { updateTabTitles() },
+        onRun = { runExtractNow() }
     )
     private val tabs = JTabbedPane()
 
@@ -173,6 +179,7 @@ class RequestEditorPanel(
         current?.let { pathPanel.syncFromUrl(it.url) }
         paramsPanel.commitPendingEdit()
         headersPanel.commitPendingEdit()
+        extractorsPanel.commitPendingEdit()
     }
 
     private fun onParamsChanged() {
@@ -221,7 +228,13 @@ class RequestEditorPanel(
         tabs.addTab("Path Params", pathPanel)
         tabs.addTab("Headers", wrapTable("Request headers override globals.", headersPanel))
         tabs.addTab("Body", buildBodyPanel())
+        tabs.addTab("Extract (0)", buildExtractPanel())
         return tabs
+    }
+
+    private fun buildExtractPanel(): JComponent = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        border = JBUI.Borders.empty(8, 6)
+        add(extractorsPanel, BorderLayout.CENTER)
     }
 
     private fun wrapTable(text: String, table: KeyValueTablePanel): JComponent {
@@ -307,6 +320,8 @@ class RequestEditorPanel(
     }
 
     fun open(request: HttpRequestConfig) {
+        // Commit a cell that is still being edited before the table is rebound to another request.
+        extractorsPanel.commitPendingEdit()
         current = request
         binding = true
         try {
@@ -323,6 +338,7 @@ class RequestEditorPanel(
             pathPanel.bind(request)
             paramsPanel.bind(request.params, globalParams.filter { it.enabled })
             headersPanel.bind(request.headers, globalHeaders.filter { it.enabled })
+            extractorsPanel.bind(request.extractors)
             val type = request.bodyTypeEnum()
             bodyTypeCombo.selectedIndex = BodyType.entries.indexOf(type)
             bodyArea.text = request.body
@@ -361,6 +377,16 @@ class RequestEditorPanel(
         pathPanel.refreshVariables()
         paramsPanel.refreshVariableHighlighting()
         headersPanel.refreshVariableHighlighting()
+    }
+
+    /** Shows what the last run of this request's Extract rules changed. */
+    fun setExtractionReport(report: ExtractionReport?) {
+        extractorsPanel.setResults(report)
+    }
+
+    private fun runExtractNow() {
+        extractorsPanel.commitPendingEdit()
+        onRunExtract()
     }
 
     fun focusUrl() {
@@ -415,6 +441,7 @@ class RequestEditorPanel(
         tabs.setTitleAt(1, "Path Params (${pathPanel.count()})")
         tabs.setTitleAt(2, "Headers (${request.headers.size + headersPanel.fixedCount()})")
         tabs.setTitleAt(3, "Body")
+        tabs.setTitleAt(4, "Extract (${request.extractors.size})")
     }
 
     private fun setEditorEnabled(enabled: Boolean) {
@@ -423,6 +450,7 @@ class RequestEditorPanel(
         urlField.isEnabled = enabled
         sendButton.isEnabled = enabled
         tabs.isEnabled = enabled
+        extractorsPanel.setEnabledState(enabled)
         bodyArea.isEnabled = enabled && current?.bodyTypeEnum() != BodyType.NONE
         if (!enabled) {
             nameField.text = ""

@@ -115,12 +115,14 @@ class HttpRequestConfig(
     var pathParams: MutableList<KeyValue> = mutableListOf(),
     var bodyType: String = BodyType.NONE.name,
     var body: String = "",
-    var springKey: String? = null
+    var springKey: String? = null,
+    var extractors: MutableList<ResponseExtractor> = mutableListOf()
 ) {
     fun normalize() {
         method = method.uppercase().takeIf { it in HTTP_METHODS } ?: "GET"
         if (name.isBlank()) name = "New Request"
         if (BodyType.entries.none { it.name == bodyType }) bodyType = BodyType.NONE.name
+        extractors.removeAll { it.variable.isBlank() && it.source.isBlank() }
     }
 
     fun bodyTypeEnum(): BodyType = BodyType.entries.firstOrNull { it.name == bodyType } ?: BodyType.NONE
@@ -136,11 +138,38 @@ class HttpRequestConfig(
         copy.bodyType = bodyType
         copy.body = body
         copy.springKey = springKey
+        copy.extractors = extractors.map { it.deepCopy() }.toMutableList()
     }
 
     companion object {
         val HTTP_METHODS = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
     }
+}
+
+/**
+ * A rule that copies a value out of a response into an environment variable.
+ *
+ * Rules belong to the request (not to the response view) because they are part of the request
+ * definition: they are saved with the request, they make request chaining possible (`{{token}}` in
+ * the next request), and they are evaluated again on every response.
+ *
+ * [source] uses the syntax documented on [dev.smartrequest.extract.ResponseExtractorEngine]:
+ * `data.a.b`, `data.items[0].id`, `data["a.b"]`, `headers.X-Request-Id`, `status`, `statusText`.
+ */
+class ResponseExtractor(
+    var id: String = UUID.randomUUID().toString(),
+    var enabled: Boolean = true,
+    var variable: String = "",
+    var source: String = ""
+) {
+    fun deepCopy(): ResponseExtractor = ResponseExtractor().also { copy ->
+        copy.id = id
+        copy.enabled = enabled
+        copy.variable = variable
+        copy.source = source
+    }
+
+    fun isBlank(): Boolean = variable.isBlank() && source.isBlank()
 }
 
 class KeyValue(

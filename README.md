@@ -82,6 +82,34 @@
   - 切换请求再切回来，不需要重新发送就能看到上次的状态、Header 和 Body。
   - 最多缓存 10 个请求的响应，内存中保存，不写入 `.idea`。
 
+### 响应提取（Extract）
+
+把响应里的值自动存进当前环境的变量，实现“登录拿 token → 下一个请求带上 token”的串联。
+
+- 请求编辑器新增 `Extract` Tab：每条规则一行，`Variable` 是目标变量名，`Source` 是取值表达式。
+- 每次请求完成（含 4xx / 5xx）自动执行；也可以在 Tab 里点 `Run now`，用上一次缓存的响应重跑，不必重新发请求。
+- `Source` 语法：
+
+  | 表达式 | 含义 |
+  | --- | --- |
+  | `data.token` | JSON Body 字段，逐级用 `.` |
+  | `data.items[0].id` | 数组下标 |
+  | `data.items[-1].id` | 倒数第一个元素 |
+  | `data["user.name"]` | key 含 `.`、空格等特殊字符时用括号写法 |
+  | `data` | 整个 Body（对象/数组压成紧凑 JSON） |
+  | `headers.X-Request-Id` | 响应头，大小写不敏感 |
+  | `status` / `statusText` | 状态码 / 状态短语 |
+
+- 变量名留空时自动取路径最后一段：`data.user.id` → `id`，`headers.X-Request-Id` → `X_Request_Id`；特殊字符替换成 `_`。
+- 写回规则：
+  - 当前环境已有同名变量 → 更新值；被禁用的变量会重新启用。
+  - 没有 → 追加到当前环境变量列表末尾。
+  - 变量名是 `baseUrl` 时直接报错（它是 Host Address 的保留名）。
+  - 提取失败（路径不存在、值为 `null`、Body 不是 JSON、Body 被截断、二进制响应）**不会覆盖旧值**，只在结果列显示原因。
+- 响应区新增只读 `Variables` Tab，列出这次响应抓到的变量、值和结果；`Extract` Tab 的 `Last run` 列显示同样的结果，悬停可以看到 `旧值 → 新值`。
+- 写入的变量立即生效，`{{token}}` 的高亮与补全也会刷新。
+- 变量保存在 `.idea/smart-request.xml` 中，属于**明文**存储，注意不要提交真实 token。
+
 ### 复制为 cURL
 
 - 在请求树中右键请求 → `Copy as cURL`，支持：
@@ -337,7 +365,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（111 个）：
+当前测试覆盖（161 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -345,6 +373,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 全局/请求 Header、Params 合并
 - 请求体 Content-Type 与变量解析
 - JSON 格式化
+- 响应提取：JSON 路径求值（嵌套、下标、负下标、括号 key、null、缺失、非 JSON、大整数精度）、提取引擎（新增/更新/重新启用/失败不覆盖/headers/status/派生变量名）、两个 Tab 的计数与结果展示
 - Spring 路径拼接、路径正则清理
 - 用 PSI 扫描真实的 `@RestController` / `@RequestMapping` / `@GetMapping` 注解结构
 - 从方法生成请求：Method/URL/Path 参数/`@RequestParam`/`@RequestBody`/Swagger summary
@@ -427,6 +456,18 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 - 已定义变量蓝色高亮，未定义变量红色高亮；URL 中的 `{id}` 绿色高亮。
 - 切换环境后颜色和补全列表立即更新。
 
+### 从响应中提取变量（Extract）
+
+场景：`POST /login` 返回 `{"data":{"accessToken":"..."}}`，后续所有请求都要带 `Authorization: Bearer {{token}}`。
+
+1. 选中登录请求，切到 `Extract` Tab，点 `+`。
+2. `Source` 填 `data.data.accessToken`；变量名留空会自动变成 `accessToken`，也可以手动改成 `token`。
+3. 点 `Send`。响应回来后 `Last run` 列显示 `Added`，响应区 `Variables` Tab 里能看到具体值。
+4. 在别的请求 Header 里写 `Authorization: Bearer {{token}}`，直接发送即可。
+5. 之后再发送登录请求会刷新这个变量；勾掉行首勾选框可以临时停用某条规则。
+
+提取失败时旧值会被保留，例如接口临时返回 `{"data":null}`，不会把可用的 token 冲掉。
+
 ### 移动请求到其他分组
 
 1. 在左侧请求树右键要移动的请求。
@@ -481,6 +522,9 @@ src/main/kotlin/dev/smartrequest/
 │   ├── CurlCommandBuilder.kt# Linux/PowerShell cURL 生成
 │   └── VariableResolver.kt  # {{variable}} 递归解析
 ├── model/                   # 持久化模型（环境、请求、历史）
+├── extract/                 # 响应提取：JSON 读取、路径求值、写回环境变量
+│   ├── JsonPath.kt          # 无依赖 JSON 读取与 data./headers./status 路径求值
+│   └── ResponseExtractorEngine.kt # 规则求值、失败不覆盖、变量写回与结果报告
 ├── service/                 # 项目级 PersistentStateComponent
 ├── spring/                  # Spring Controller PSI 扫描、请求生成/导入
 │   ├── SpringEndpointScanner.kt
@@ -494,6 +538,7 @@ src/main/kotlin/dev/smartrequest/
 │   ├── PathParameterPanel.kt# Path 参数表格
 │   ├── ResponsePanel.kt     # 响应展示
 │   ├── KeyValueTablePanel.kt# 可复用 Key/Value 表格
+│   ├── ExtractorTablePanel.kt# Extract 规则表格与上次执行结果
 │   ├── TableLayout.kt       # 表格列宽比例分配与单击编辑
 │   ├── VariableTextSupport.kt# 变量高亮与补全
 │   ├── VariableHtml.kt      # 表格变量高亮
@@ -521,6 +566,11 @@ src/main/kotlin/dev/smartrequest/
    - 用 `Controller#method:HTTP:path` 作为稳定 key。
    - 只更新 Method/URL/Name，不覆盖用户编辑的 Body/Params/Headers。
 
+5. **响应提取用声明式路径，而不是脚本**
+   - 每条规则就是一个表达式 + 一个变量名，行为可预测，失败原因能一句话说清。
+   - 不引入 JS 引擎或 JSONPath 依赖，插件体积和启动不受影响。
+   - 代价是比脚本表达力弱：目前没有断言、条件、循环和数组批量提取。
+
 ---
 
 ## 7. 已知限制
@@ -531,8 +581,8 @@ src/main/kotlin/dev/smartrequest/
 - 响应缓存只在当前 IDE 会话有效，重启 IDE 后清空。
 - 不支持 multipart/form-data、文件上传、二进制 Body。
 - 不支持 Cookie 持久化、代理、自定义 SSL 证书、OAuth2 授权流程。
-- 没有 pre-request / post-response 脚本、断言、批量 Runner。
-- 环境变量和请求历史快照明文保存在 `.idea/smart-request.xml`。
+- 没有 pre-request / post-response 脚本、断言、批量 Runner；响应提取是声明式路径，只覆盖 JSON Body、响应头和状态码，暂不支持 XML、正则和数组批量提取。
+- 环境变量和请求历史快照明文保存在 `.idea/smart-request.xml`，响应提取写入的变量同样如此。
 - Spring 扫描只识别直接标注的注解，不识别自定义组合注解；Body 生成基于 DTO 字段和字段注解，不解析完整 Swagger/OpenAPI schema 或方法级 `@Operation` 里的 requestBody 示例。
 - 表格行不支持拖拽排序，也不支持从剪贴板批量粘贴多行 `Key: Value`。
 - URL 同步只覆盖 Query 部分；修改 URL 里的 Path `{占位符}` 会增删 Path Params 行，但反过来在表格里改不了 Path 名。
