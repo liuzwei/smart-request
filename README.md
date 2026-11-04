@@ -373,7 +373,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（174 个）：
+当前测试覆盖（217 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -394,6 +394,10 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - Controller 分组导入的创建、幂等更新、保留用户已填值
 - 真实本地 HTTP Server 的 GET/POST、gzip 解压、错误状态码
 - `.idea/smart-request.xml` 对应模型（含 Path 参数、History 快照、环境级全局 Header/Params）的 XmlSerializer 往返测试
+- 场景模型：normalize 自动补齐 `START` / `END`、清理悬空边与重复终端、并行上限、深拷贝不共享节点/边/出参
+- 场景校验：环、不可达节点、到不了 `END` 的死路、请求已删除、变量数据流（缺变量、产出者不在上游）、并行写同名变量警告、参数被出参遮蔽、重复依赖、非法 `expectStatus` / JSONPath、`baseUrl` 参数、禁用行不需要变量
+- 场景执行引擎：线性传参、fork/join 等待、并行上限、失败即停（取消在飞节点、跳过剩余节点）、`expectStatus`、出参失败不泄漏、参数 > 环境 / 出参 > 参数的优先级、请求丢失、取消、失败后结果仍完整
+- 场景的 XmlSerializer 往返：节点、连线、出参、`expectStatus`、超时、并行度、参数
 - 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
 - 请求右键菜单 `Move to Group` 的子菜单内容与回调
 - 变量高亮、Path 参数自动同步

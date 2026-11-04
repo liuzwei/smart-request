@@ -35,20 +35,26 @@ object RequestPreparer {
         globalHeaders: List<KeyValue>,
         globalParams: List<KeyValue>,
         timeoutMs: Int,
-        followRedirects: Boolean
+        followRedirects: Boolean,
+        variables: Map<String, String> = emptyMap()
     ): PrepareResult {
-        val variables = VariableResolver.environmentVariables(environment)
+        // Run-scoped values (scenario parameters and captured values) win over the environment, so a
+        // scenario can pass a token downstream without mutating the environment.
+        val resolvedVariables = VariableResolver.mergeVariables(
+            VariableResolver.environmentVariables(environment),
+            variables
+        )
         val warnings = LinkedHashSet<String>()
 
         val mergedParams = mergeParameters(request.params, globalParams)
-        val urlResult = RequestUrlBuilder.build(request.url, mergedParams, variables, request.pathParams)
+        val urlResult = RequestUrlBuilder.build(request.url, mergedParams, resolvedVariables, request.pathParams)
         warnings += urlResult.unresolved
 
         val mergedHeaders = mergeHeaders(request.headers, globalHeaders)
         val finalHeaders = LinkedHashMap<String, String>()
         for ((key, value) in mergedHeaders) {
-            val resolvedKey = VariableResolver.resolve(key, variables)
-            val resolvedValue = VariableResolver.resolve(value, variables)
+            val resolvedKey = VariableResolver.resolve(key, resolvedVariables)
+            val resolvedValue = VariableResolver.resolve(value, resolvedVariables)
             warnings += resolvedKey.unresolved
             warnings += resolvedValue.unresolved
             val normalizedKey = resolvedKey.text.trim()
@@ -60,7 +66,7 @@ object RequestPreparer {
         val body = if (bodyType == BodyType.NONE) {
             null
         } else {
-            val resolvedBody = VariableResolver.resolve(request.body, variables)
+            val resolvedBody = VariableResolver.resolve(request.body, resolvedVariables)
             warnings += resolvedBody.unresolved
             resolvedBody.text
         }

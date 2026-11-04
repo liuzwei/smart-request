@@ -24,6 +24,7 @@ class SmartRequestState {
     var globalParams: MutableList<KeyValue> = mutableListOf()
 
     var groups: MutableList<RequestGroup> = mutableListOf()
+    var scenarios: MutableList<ScenarioConfig> = mutableListOf()
     var history: MutableList<RequestHistoryEntry> = mutableListOf()
     var timeoutMs: Int = DEFAULT_TIMEOUT_MS
     var followRedirects: Boolean = true
@@ -41,7 +42,8 @@ class SmartRequestState {
 
         // Project-wide globals from older versions belong to whichever environment was active.
         migrateLegacyGlobals()
-        if (version < 2) version = 2
+        scenarios.forEach { it.normalize() }
+        if (version < CURRENT_VERSION) version = CURRENT_VERSION
         if (timeoutMs !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) timeoutMs = DEFAULT_TIMEOUT_MS
 
         if (groups.isEmpty()) {
@@ -52,6 +54,8 @@ class SmartRequestState {
             history = history.take(MAX_HISTORY).toMutableList()
         }
     }
+
+    fun scenario(id: String): ScenarioConfig? = scenarios.firstOrNull { it.id == id }
 
     @Suppress("DEPRECATION")
     private fun migrateLegacyGlobals() {
@@ -77,6 +81,8 @@ class SmartRequestState {
         environments.firstOrNull { it.id == activeEnvironmentId } ?: environments.firstOrNull()
 
     companion object {
+        /** Bumped when [normalize] has to rewrite older state; see [ScenarioConfig]. */
+        const val CURRENT_VERSION = 3
         const val DEFAULT_TIMEOUT_MS = 30_000
         const val MIN_TIMEOUT_MS = 1_000
         const val MAX_TIMEOUT_MS = 600_000
@@ -209,6 +215,143 @@ class ResponseExtractor(
     }
 
     fun isBlank(): Boolean = variable.isBlank() && source.isBlank()
+}
+
+/**
+ * A flow of requests executed as one activity-on-node graph: one START node, request nodes in the
+ * middle and one END node. Nodes reference [HttpRequestConfig.id], so renaming or moving a request
+ * never breaks a scenario.
+ *
+ * Nodes capture values with the same [ResponseExtractor] rules the Extract tab uses. Captured values
+ * stay in the run scope; a scenario run never writes the environment.
+ */
+class ScenarioConfig(
+    var id: String = UUID.randomUUID().toString(),
+    var name: String = "New Scenario",
+    var notes: String = "",
+    var maxParallel: Int = DEFAULT_MAX_PARALLEL,
+    var parameters: MutableList<KeyValue> = mutableListOf(),
+    var nodes: MutableList<ScenarioNode> = mutableListOf(),
+    var edges: MutableList<ScenarioEdge> = mutableListOf()
+) {
+    fun normalize() {
+        if (name.isBlank()) name = "New Scenario"
+        maxParallel = maxParallel.coerceIn(MIN_MAX_PARALLEL, MAX_MAX_PARALLEL)
+        parameters.removeAll { it.key.isBlank() }
+        nodes.forEach { it.normalize() }
+        normalizeTerminal(ScenarioNode.KIND_START)
+        normalizeTerminal(ScenarioNode.KIND_END)
+
+        val known = nodes.map { it.id }.toSet()
+        val seen = HashSet<String>()
+        edges.removeAll { edge ->
+            edge.from !in known || edge.to !in known || edge.from == edge.to ||
+                !seen.add("${edge.from}\u0000${edge.to}")
+        }
+        edges.forEach { if (it.id.isBlank()) it.id = UUID.randomUUID().toString() }
+    }
+
+    private fun normalizeTerminal(kind: String) {
+        val terminals = nodes.filter { it.kind == kind }
+        if (terminals.isEmpty()) {
+            val x = if (kind == ScenarioNode.KIND_START) {
+                (nodes.minOfOrNull { it.x } ?: 0) - TERMINAL_SPACING
+            } else {
+                (nodes.maxOfOrNull { it.x } ?: 0) + TERMINAL_SPACING
+            }
+            nodes.add(
+                ScenarioNode(
+                    kind = kind,
+                    name = if (kind == ScenarioNode.KIND_START) "Start" else "End",
+                    x = x,
+                    y = 0
+                )
+            )
+            return
+        }
+        terminals.drop(1).forEach { extra ->
+            nodes.removeAll { it.id == extra.id }
+            edges.removeAll { it.from == extra.id || it.to == extra.id }
+        }
+    }
+
+    fun deepCopy(): ScenarioConfig = ScenarioConfig().also { copy ->
+        copy.id = id
+        copy.name = name
+        copy.notes = notes
+        copy.maxParallel = maxParallel
+        copy.parameters = parameters.map { it.deepCopy() }.toMutableList()
+        copy.nodes = nodes.map { it.deepCopy() }.toMutableList()
+        copy.edges = edges.map { it.deepCopy() }.toMutableList()
+    }
+
+    companion object {
+        const val DEFAULT_MAX_PARALLEL = 4
+        const val MIN_MAX_PARALLEL = 1
+        const val MAX_MAX_PARALLEL = 10
+        const val TERMINAL_SPACING = 220
+    }
+}
+
+class ScenarioNode(
+    var id: String = UUID.randomUUID().toString(),
+    var kind: String = KIND_REQUEST,
+    var requestId: String? = null,
+    var name: String = "",
+    var x: Int = 0,
+    var y: Int = 0,
+    var expectStatus: String = "",
+    var timeoutMs: Int? = null,
+    var outputs: MutableList<ResponseExtractor> = mutableListOf()
+) {
+    fun normalize() {
+        if (id.isBlank()) id = UUID.randomUUID().toString()
+        if (kind !in KINDS) kind = KIND_REQUEST
+        outputs.removeAll { it.isBlank() }
+        if (kind != KIND_REQUEST) {
+            requestId = null
+            outputs.clear()
+            expectStatus = ""
+            timeoutMs = null
+        } else {
+            if (requestId.isNullOrBlank()) requestId = null
+            timeoutMs = timeoutMs?.coerceIn(SmartRequestState.MIN_TIMEOUT_MS, SmartRequestState.MAX_TIMEOUT_MS)
+            expectStatus = expectStatus.trim()
+        }
+    }
+
+    fun isRequestNode(): Boolean = kind == KIND_REQUEST
+
+    fun deepCopy(): ScenarioNode = ScenarioNode().also { copy ->
+        copy.id = id
+        copy.kind = kind
+        copy.requestId = requestId
+        copy.name = name
+        copy.x = x
+        copy.y = y
+        copy.expectStatus = expectStatus
+        copy.timeoutMs = timeoutMs
+        copy.outputs = outputs.map { it.deepCopy() }.toMutableList()
+    }
+
+    companion object {
+        const val KIND_START = "START"
+        const val KIND_REQUEST = "REQUEST"
+        const val KIND_END = "END"
+        val KINDS = setOf(KIND_START, KIND_REQUEST, KIND_END)
+    }
+}
+
+/**
+ * An unconditional dependency: [to] runs only after [from] passed. v1 has no failure branches, so
+ * there is no condition; adding one later is backwards compatible (absent = success).
+ */
+class ScenarioEdge(
+    var id: String = UUID.randomUUID().toString(),
+    var from: String = "",
+    var to: String = ""
+) {
+    fun deepCopy(): ScenarioEdge = ScenarioEdge(id = id, from = from, to = to)
 }
 
 class KeyValue(

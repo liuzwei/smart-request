@@ -81,7 +81,7 @@ class ModelsTest {
         assertEquals(1, environment.globalHeaders.count { it.key == "X-Keep" })
         assertEquals("env", environment.globalHeaders.first { it.key == "X-Keep" }.value)
         assertEquals("acme", environment.globalParams.single().value)
-        assertEquals(2, state.version)
+        assertEquals(SmartRequestState.CURRENT_VERSION, state.version)
     }
 
     @Test
@@ -96,5 +96,63 @@ class ModelsTest {
         assertEquals("Bearer env", copy.globalHeaders.single().value)
         assertEquals("tenant", copy.globalParams.single().key)
         assertNotSame(environment.globalHeaders.first(), copy.globalHeaders.first())
+    }
+
+    @Test
+    fun `scenario normalization adds terminals and drops dangling edges`() {
+        val requestNode = ScenarioNode(kind = ScenarioNode.KIND_REQUEST, requestId = "request-1", x = 100)
+        val scenario = ScenarioConfig(nodes = mutableListOf(requestNode)).apply {
+            edges.add(ScenarioEdge(from = "missing", to = "also-missing"))
+        }
+
+        scenario.normalize()
+
+        assertEquals(3, scenario.nodes.size)
+        val start = scenario.nodes.single { it.kind == ScenarioNode.KIND_START }
+        val end = scenario.nodes.single { it.kind == ScenarioNode.KIND_END }
+        assertTrue(start.x < requestNode.x)
+        assertTrue(end.x > requestNode.x)
+        assertTrue(scenario.edges.isEmpty())
+    }
+
+    @Test
+    fun `scenario normalization keeps a single terminal and its edges`() {
+        val start = ScenarioNode(kind = ScenarioNode.KIND_START)
+        val requestNode = ScenarioNode(kind = ScenarioNode.KIND_REQUEST, requestId = "request-1")
+        val duplicateStart = ScenarioNode(kind = ScenarioNode.KIND_START)
+        val scenario = ScenarioConfig(nodes = mutableListOf(start, requestNode, duplicateStart)).apply {
+            edges.add(ScenarioEdge(from = duplicateStart.id, to = requestNode.id))
+            edges.add(ScenarioEdge(from = start.id, to = requestNode.id))
+            maxParallel = 99
+        }
+
+        scenario.normalize()
+
+        assertEquals(1, scenario.nodes.count { it.kind == ScenarioNode.KIND_START })
+        assertEquals(ScenarioConfig.MAX_MAX_PARALLEL, scenario.maxParallel)
+        assertTrue(scenario.edges.none { it.from == duplicateStart.id })
+        assertTrue(scenario.edges.any { it.from == start.id && it.to == requestNode.id })
+    }
+
+    @Test
+    fun `scenario deep copy does not share nodes edges or outputs`() {
+        val node = ScenarioNode(
+            kind = ScenarioNode.KIND_REQUEST,
+            requestId = "request-1",
+            outputs = mutableListOf(ResponseExtractor(variable = "token", source = "data.token"))
+        )
+        val scenario = ScenarioConfig(
+            name = "Checkout",
+            nodes = mutableListOf(node),
+            edges = mutableListOf(ScenarioEdge(from = "a", to = "b"))
+        )
+
+        val copy = scenario.deepCopy()
+
+        assertEquals("Checkout", copy.name)
+        assertNotSame(scenario.nodes.first(), copy.nodes.first())
+        assertNotSame(scenario.nodes.first().outputs.first(), copy.nodes.first().outputs.first())
+        assertNotSame(scenario.edges.first(), copy.edges.first())
+        assertEquals(scenario.nodes.first().id, copy.nodes.first().id)
     }
 }

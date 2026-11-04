@@ -20,6 +20,9 @@
     重新打开列表，输入 `{{name}}` 会自动去掉花括号。
   - 同名变量更新（含重新启用），否则追加；`baseUrl` 保留；失败时不覆盖旧值。
   - 失败原因（路径不存在、`null`、非 JSON、截断、二进制）逐行显示。
+- 场景编排（Scenarios）基础能力：项目文件新增场景模型（活动网络图，`START` / 请求节点 / `END`）、
+  静态校验（环、孤立节点、请求已删除、变量数据流）与 DAG 执行引擎（失败即停、并行上限、单节点超时、
+  运行期变量作用域）。界面在下一阶段接入，当前版本尚不可见。
 - 开源协议：Apache License 2.0（`LICENSE`），并补充 `NOTICE`、`DISCLAIMER.md`、`SECURITY.md`、
   `CONTRIBUTING.md`、Issue/PR 模板。
 - 插件 zip 内置 `LICENSE`、`NOTICE`、`DISCLAIMER.md`。

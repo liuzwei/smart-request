@@ -10,6 +10,9 @@ import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.RequestHistoryEntry
 import dev.smartrequest.model.ResponseExtractor
+import dev.smartrequest.model.ScenarioConfig
+import dev.smartrequest.model.ScenarioEdge
+import dev.smartrequest.model.ScenarioNode
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.dialogs.EnvironmentDialog
 import dev.smartrequest.ui.dialogs.HistoryDialog
@@ -138,5 +141,52 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals(200, restored.history.first().statusCode)
         assertEquals("42", restored.history.first().request.pathParams.first().value)
         assertEquals(state.environments.first().id, restored.environments.first().id)
+    }
+
+    fun testScenarioRoundTripsThroughXmlSerializer() {
+        val start = ScenarioNode(kind = ScenarioNode.KIND_START, name = "Start", x = -220)
+        val login = ScenarioNode(
+            kind = ScenarioNode.KIND_REQUEST,
+            requestId = "request-1",
+            x = 0,
+            y = 40,
+            expectStatus = "2xx",
+            timeoutMs = 5_000,
+            outputs = mutableListOf(ResponseExtractor(variable = "token", source = "data.token"))
+        )
+        val end = ScenarioNode(kind = ScenarioNode.KIND_END, name = "End", x = 220)
+        val state = SmartRequestState.createDefault().apply {
+            scenarios.add(
+                ScenarioConfig(
+                    name = "Checkout",
+                    notes = "Smoke test",
+                    maxParallel = 3,
+                    parameters = mutableListOf(KeyValue.of("tenant", "acme")),
+                    nodes = mutableListOf(start, login, end),
+                    edges = mutableListOf(
+                        ScenarioEdge(from = start.id, to = login.id),
+                        ScenarioEdge(from = login.id, to = end.id)
+                    )
+                )
+            )
+        }
+
+        val restored = XmlSerializer.deserialize(XmlSerializer.serialize(state), SmartRequestState::class.java)
+
+        val scenario = restored.scenarios.single()
+        assertEquals("Checkout", scenario.name)
+        assertEquals("Smoke test", scenario.notes)
+        assertEquals(3, scenario.maxParallel)
+        assertEquals("tenant", scenario.parameters.single().key)
+        assertEquals(3, scenario.nodes.size)
+        val restoredLogin = scenario.nodes.single { it.kind == ScenarioNode.KIND_REQUEST }
+        assertEquals("request-1", restoredLogin.requestId)
+        assertEquals(40, restoredLogin.y)
+        assertEquals("2xx", restoredLogin.expectStatus)
+        assertEquals(5_000, restoredLogin.timeoutMs)
+        assertEquals("token", restoredLogin.outputs.single().variable)
+        assertEquals("data.token", restoredLogin.outputs.single().source)
+        assertEquals(2, scenario.edges.size)
+        assertTrue(scenario.edges.any { it.from == start.id && it.to == login.id })
     }
 }

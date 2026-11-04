@@ -127,6 +127,61 @@ class RequestPreparerTest {
         assertEquals("abc", header(prepared.request.headers, "X-Trace"))
     }
 
+    @Test
+    fun `run variables override environment variables`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/users"
+            headers.add(KeyValue.of("Authorization", "Bearer {{token}}"))
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{token}}"}"""
+        }
+
+        val prepared = RequestPreparer.prepare(
+            request,
+            environment,
+            emptyList(),
+            emptyList(),
+            30_000,
+            true,
+            mapOf("token" to "from-run")
+        )
+
+        assertEquals("Bearer from-run", header(prepared.request.headers, "Authorization"))
+        assertEquals("""{"token":"from-run"}""", prepared.request.body)
+    }
+
+    @Test
+    fun `run variables are used in urls`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/orders/{{orderId}}"
+        }
+
+        val prepared = RequestPreparer.prepare(
+            request,
+            environment,
+            emptyList(),
+            emptyList(),
+            30_000,
+            true,
+            mapOf("orderId" to "42")
+        )
+
+        assertEquals("http://localhost:8080/orders/42", prepared.request.url)
+    }
+
+    @Test
+    fun `a variable missing from both the environment and the run scope is reported`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/orders/{{orderId}}"
+        }
+
+        val error = assertThrows(RequestBuildException::class.java) {
+            RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true, emptyMap())
+        }
+
+        assertTrue(error.message!!.contains("orderId"))
+    }
+
     private fun header(headers: List<Pair<String, String>>, name: String): String? =
         headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
 }
