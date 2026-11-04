@@ -85,7 +85,8 @@ class RequestEditorPanel(
     )
     private val headersPanel = KeyValueTablePanel(
         onChanged = { updateTabTitles() },
-        variablesProvider = variablesProvider
+        variablesProvider = variablesProvider,
+        keySuggestions = dev.smartrequest.http.HttpHeaderNames.COMMON
     )
     private val extractorsPanel: ExtractorTablePanel = ExtractorTablePanel(
         onChanged = { updateTabTitles() },

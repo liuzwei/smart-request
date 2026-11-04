@@ -1,5 +1,7 @@
 package dev.smartrequest.ui
 
+import com.intellij.openapi.ui.popup.JBPopup
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
@@ -10,9 +12,11 @@ import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.KeyValue
 import java.awt.BorderLayout
 import java.awt.Component
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Insets
 import javax.swing.AbstractCellEditor
 import javax.swing.BorderFactory
 import javax.swing.JButton
@@ -22,6 +26,7 @@ import javax.swing.JPanel
 import javax.swing.JTable
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
+import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
@@ -34,11 +39,15 @@ import javax.swing.table.TableCellRenderer
  * Rows supplied as [fixedRows] are rendered read-only and cannot be removed, which is how global
  * headers/params stay locked in the request editor. The key and value columns share the available
  * width 3:4 so long keys stay readable, and a single click turns a cell into an inline editor.
+ *
+ * [keySuggestions] adds a chooser for the key column (the common HTTP header names), while still
+ * allowing any name to be typed.
  */
 class KeyValueTablePanel(
     private val onChanged: () -> Unit = {},
     private val showLegend: Boolean = true,
-    private val variablesProvider: (() -> Map<String, String>)? = null
+    private val variablesProvider: (() -> Map<String, String>)? = null,
+    private val keySuggestions: List<String> = emptyList()
 ) : JBPanel<KeyValueTablePanel>(BorderLayout()) {
 
     private var target: MutableList<KeyValue>? = null
@@ -216,6 +225,12 @@ class KeyValueTablePanel(
         return true
     }
 
+    /** Applies [name] to the key cell, exactly like choosing it from the header list would. */
+    internal fun chooseKeySuggestion(row: Int, name: String) {
+        if (!beginEdit(row, KEY_COLUMN)) return
+        (table.cellEditor as? ValueEditor)?.chooseKey(name)
+    }
+
     /** Simulates editing a row, used by tests that exercise the surrounding panels. */
     internal fun setRowValues(row: Int, key: String, value: String) {
         model.setValueAt(key, row, KEY_COLUMN)
@@ -341,8 +356,8 @@ class KeyValueTablePanel(
                 raw
             }
             toolTipText = when {
-                fixed && raw.isNotEmpty() -> "$raw — global value, edit it in Global Settings"
-                fixed -> "Global value, edit it in Global Settings"
+                fixed && raw.isNotEmpty() -> "$raw — global value of the active environment, edit it in Environments"
+                fixed -> "Global value of the active environment, edit it in Environments"
                 raw.isNotEmpty() -> raw
                 else -> null
             }
@@ -358,6 +373,26 @@ class KeyValueTablePanel(
             VariableTextField(variablesProvider, requestFocusInPopup = false)
         } else {
             JTextField()
+        }
+        private var headerPopup: JBPopup? = null
+
+        /** The field plus a chooser button, used for the header-name column. */
+        private val keyComponent: JPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(field, BorderLayout.CENTER)
+            add(
+                JButton("▾").apply {
+                    toolTipText = "Choose a common header"
+                    isFocusPainted = false
+                    isContentAreaFilled = false
+                    margin = Insets(0, 0, 0, 0)
+                    border = JBUI.Borders.empty(0, 2)
+                    preferredSize = Dimension(JBUI.scale(20), JBUI.scale(20))
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    addActionListener { showKeySuggestions() }
+                },
+                BorderLayout.EAST
+            )
         }
 
         init {
@@ -385,6 +420,7 @@ class KeyValueTablePanel(
         ): Component {
             editRow = row
             editColumn = table.convertColumnIndexToModel(column)
+            hideKeySuggestions()
             loading = true
             try {
                 field.text = value?.toString().orEmpty()
@@ -393,10 +429,64 @@ class KeyValueTablePanel(
             } finally {
                 loading = false
             }
+            val showChooser = editColumn == KEY_COLUMN && keySuggestions.isNotEmpty()
+            if (showChooser) {
+                // The field is shared with the value column, where it is handed to the table
+                // directly; put it back into the panel before the panel is returned as the editor.
+                if (field.parent !== keyComponent) {
+                    keyComponent.add(field, BorderLayout.CENTER)
+                    keyComponent.revalidate()
+                }
+                // The editor component is now a panel, so KeyValueTablePanel.beginEdit() cannot focus
+                // the field for us.
+                SwingUtilities.invokeLater {
+                    field.requestFocusInWindow()
+                    field.selectAll()
+                }
+                return keyComponent
+            }
             return field
         }
 
         override fun getCellEditorValue(): Any = field.text
+
+        override fun stopCellEditing(): Boolean {
+            hideKeySuggestions()
+            return super.stopCellEditing()
+        }
+
+        override fun cancelCellEditing() {
+            hideKeySuggestions()
+            super.cancelCellEditing()
+        }
+
+        /** Applies [name] to the edited key cell, exactly like choosing it from the list. */
+        fun chooseKey(name: String) {
+            headerPopup = null
+            field.text = name
+            model.setValueAt(name, editRow, editColumn)
+            stopCellEditing()
+        }
+
+        private fun showKeySuggestions() {
+            if (headerPopup?.isVisible == true) return
+            if (!field.isShowing) return
+            val created = JBPopupFactory.getInstance()
+                .createPopupChooserBuilder(keySuggestions)
+                .setTitle("Common headers")
+                .setMovable(false)
+                .setResizable(false)
+                .setRequestFocus(false)
+                .setItemChosenCallback { name -> chooseKey(name) }
+                .createPopup()
+            headerPopup = created
+            created.showUnderneathOf(field)
+        }
+
+        private fun hideKeySuggestions() {
+            headerPopup?.cancel()
+            headerPopup = null
+        }
     }
 
     private fun globalBackground(): java.awt.Color = JBColor(0xF2F4F7, 0x2B2D30)
@@ -420,6 +510,7 @@ class KeyValueTablePanel(
         val COLUMN_WEIGHTS = listOf(3.0, 4.0)
         val COLUMN_MINIMUMS = listOf(96, 128)
 
-        const val GLOBAL_LEGEND = "Rows in grey are global values from Global Settings and cannot be edited here."
+        const val GLOBAL_LEGEND =
+            "Rows in grey are global values of the active environment and cannot be edited here."
     }
 }

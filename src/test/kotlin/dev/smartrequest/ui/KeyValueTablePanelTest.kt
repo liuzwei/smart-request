@@ -6,6 +6,8 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.KeyValue
 import java.awt.event.MouseEvent
+import javax.swing.JPanel
+import javax.swing.JTextField
 
 /**
  * Covers the request editor table layout: the key and value columns must fill the available width
@@ -145,6 +147,44 @@ class KeyValueTablePanelTest : BasePlatformTestCase() {
         assertEquals(expected, applied)
         val used = applied.sum() + JBUI.scale(34)
         assertEquals("columns must fill the whole table width", 640, used)
+    }
+
+    fun testHeaderKeyEditorIsAChooserPanelButValueStaysAPlainField() {
+        val (keyIsPanel, valueIsField) = EdtTestUtil.runInEdtAndGet<Pair<Boolean, Boolean>, RuntimeException> {
+            val panel = KeyValueTablePanel(keySuggestions = listOf("Authorization", "Content-Type"))
+            panel.bind(mutableListOf(KeyValue.of("", "")))
+            panel.beginEdit(0, 1)
+            val key = panel.tableView().editorComponent is JPanel
+            panel.tableView().removeEditor()
+            panel.beginEdit(0, 2)
+            val value = panel.tableView().editorComponent is JTextField
+            key to value
+        }
+
+        assertTrue(keyIsPanel)
+        assertTrue(valueIsField)
+    }
+
+    fun testChoosingAHeaderSuggestionFillsTheKeyCell() {
+        val values = mutableListOf(KeyValue.of("", "Bearer"))
+        EdtTestUtil.runInEdtAndGet<Unit, RuntimeException> {
+            val panel = KeyValueTablePanel(keySuggestions = listOf("Authorization", "Content-Type"))
+            panel.bind(values)
+            panel.chooseKeySuggestion(0, "Authorization")
+        }
+
+        assertEquals("Authorization", values.single().key)
+    }
+
+    fun testPanelsWithoutSuggestionsKeepThePlainKeyField() {
+        val plain = EdtTestUtil.runInEdtAndGet<Boolean, RuntimeException> {
+            val panel = KeyValueTablePanel()
+            panel.bind(mutableListOf(KeyValue.of("", "")))
+            panel.beginEdit(0, 1)
+            panel.tableView().editorComponent is JTextField
+        }
+
+        assertTrue(plain)
     }
 
     private fun newPanel(): KeyValueTablePanel = KeyValueTablePanel()

@@ -170,6 +170,8 @@ Params / Headers / Path Params 共用同一套表格交互：
 - 点击别的单元格、别的 Tab 或 `Send` 时编辑器才关闭，不会出现"闪一下就退出编辑"的情况。
 - 输入过程中每个字符都会写回模型，即使编辑器被别的事件打断，已输入的内容也不会丢失。
 - 单击最左侧勾选框即可启用/禁用该行，不需要双击。
+- Headers 的 Key 单元格编辑时右侧有 `▾`，可以直接选常用 Header（`Authorization`、`Content-Type`、
+  `If-None-Match` 等 31 个），也可以手写任意名字；环境级的 `Global Headers` 表格同样支持。
 - 有内容的单元格悬停显示完整文本，长 Token 不进编辑态也能看全。
 - 当前环境的全局行显示为灰色斜体、不可编辑，悬停会提示去 `Environments` 修改。
 - 窄窗口下按列的最小宽度收缩，不会把某一列压成 0。
@@ -371,7 +373,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（170 个）：
+当前测试覆盖（174 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -397,6 +399,8 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 变量高亮、Path 参数自动同步
 - 表格列宽：3:4 比例、随宽度伸缩、窄窗口最小宽度、铺满整个表格宽度
 - 表格交互：单击进入编辑态、编辑器在表格布局变化时不被关闭、单击勾选框切换启用、全局行只读、新增行可立即编辑
+- Headers 的 Key 下拉：常用 Header 列表可选中写入、无建议的表格保持普通输入框、手写不受影响
+- Environments 对话框打开时定位到当前活动环境
 - 单元格变量补全：请求补全后单元格仍保持焦点、编辑器被关闭时已输入文本不丢失
 - URL 与 Params 双向同步：URL 改表格跟着变、表格改 URL 跟着变、取消勾选保留行、旧数据合并、重复参数不重复发送
 - Query 字符串工具：解析/编码/解码、重复 key、无值 key、fragment、`{{变量}}` 不被编码、往返一致

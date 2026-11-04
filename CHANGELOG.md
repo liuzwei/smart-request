@@ -7,6 +7,10 @@
 
 ### Added
 
+- Headers 的 Key 单元格增加下拉选择：内置 31 个常用 HTTP Header（`Authorization`、`Content-Type`、
+  `If-None-Match` 等），点 `▾` 选择，也仍然可以直接手写任意 Header 名；环境级的 `Global Headers`
+  表格同样支持。
+- `Environments` 对话框打开时自动定位到当前活动的环境，不再总是显示第一个。
 - 响应提取（Extract）：请求编辑器新增 `Extract` Tab，用声明式路径把响应里的值写入当前环境变量，
   并在响应区新增只读 `Variables` Tab 展示结果。
   - 路径语法：`data.a.b`、`data.items[0].id`、`data.items[-1].id`、`data["a.b"]`、

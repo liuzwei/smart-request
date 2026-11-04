@@ -16,6 +16,7 @@ import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.SmartRequestState
+import dev.smartrequest.http.HttpHeaderNames
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.KeyValueTablePanel
 import java.awt.BorderLayout
@@ -44,7 +45,10 @@ class EnvironmentDialog(
     private val nameField = JBTextField()
     private val baseUrlField = JBTextField()
     private val variablesPanel = KeyValueTablePanel(showLegend = false)
-    private val globalHeadersPanel = KeyValueTablePanel(showLegend = false)
+    private val globalHeadersPanel = KeyValueTablePanel(
+        showLegend = false,
+        keySuggestions = HttpHeaderNames.COMMON
+    )
     private val globalParamsPanel = KeyValueTablePanel(showLegend = false)
     private val tabs = JTabbedPane()
     private val removeButton = JButton("Remove")
@@ -56,7 +60,12 @@ class EnvironmentDialog(
         setOKButtonText("OK")
         environments.forEach { listModel.addElement(it) }
         init()
-        if (listModel.size() > 0) list.selectedIndex = 0
+        // Open on the environment the toolbar currently points at, not always on the first one.
+        val activeId = state.activeEnvironment()?.id
+        val activeIndex = environments.indexOfFirst { it.id == activeId }
+        if (listModel.size() > 0) {
+            list.selectedIndex = if (activeIndex >= 0) activeIndex else 0
+        }
         updateButtons()
     }
 
@@ -142,6 +151,9 @@ class EnvironmentDialog(
 
     /** Tab titles, used by tests to keep the order of the environment sections stable. */
     internal fun tabTitles(): List<String> = (0 until tabs.tabCount).map { tabs.getTitleAt(it) }
+
+    /** Name of the environment selected in the list; used by tests. */
+    internal fun selectedEnvironmentName(): String? = selected?.name
 
     private fun loadSelected() {
         val environment = list.selectedValue

@@ -11,7 +11,7 @@
             <li>Switch between environment profiles such as local, dev, test, and prod.</li>
             <li>Resolve <code>{{variables}}</code> from the active environment, with highlighting and completion.</li>
             <li>Support REST path parameters such as <code>/users/{id}</code> from a dedicated Path tab.</li>
-            <li>Edit header and query parameter rows with a single click, in a table whose key and value columns share a readable 3:4 layout.</li>
+            <li>Edit header and query parameter rows with a single click, in a table whose key and value columns share a readable 3:4 layout; header keys offer a list of common HTTP header names and still accept free text.</li>
             <li>Keep the URL query string and the Params table in sync in both directions.</li>
             <li>Define per-environment global headers and query parameters that are applied to every request and locked in the request editor.</li>
             <li>Keep request history and cache the last response for each request during the session.</li>

@@ -5,6 +5,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.EdtTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.xmlb.XmlSerializer
+import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.RequestHistoryEntry
@@ -75,6 +76,23 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         }
         assertNotNull(dialog)
         assertEquals(listOf("Variables", "Global Headers", "Global Params"), tabs)
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            dialog.disposeIfNeeded()
+        }
+    }
+
+    fun testEnvironmentDialogOpensOnTheActiveEnvironment() {
+        val service = project.service<SmartRequestProjectService>()
+        val state = service.state()
+        val dev = EnvironmentConfig(name = "dev", baseUrl = "http://dev:8080")
+        state.environments.add(dev)
+        state.activeEnvironmentId = dev.id
+
+        val dialog = EdtTestUtil.runInEdtAndGet<EnvironmentDialog, RuntimeException> {
+            EnvironmentDialog(project, state, service)
+        }
+
+        assertEquals("dev", dialog.selectedEnvironmentName())
         EdtTestUtil.runInEdtAndWait<RuntimeException> {
             dialog.disposeIfNeeded()
         }
