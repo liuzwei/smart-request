@@ -2,9 +2,13 @@ package dev.smartrequest.ui
 
 import com.intellij.testFramework.EdtTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.util.ui.UIUtil
 import dev.smartrequest.extract.ExtractionReport
 import dev.smartrequest.extract.ExtractionResult
 import dev.smartrequest.model.ResponseExtractor
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
+import javax.swing.JFrame
 import javax.swing.JLabel
 
 class ExtractorTablePanelTest : BasePlatformTestCase() {
@@ -146,5 +150,78 @@ class ExtractorTablePanelTest : BasePlatformTestCase() {
         assertEquals("key 'token' is not present in 'data'", text)
     }
 
-    private fun newPanel(): ExtractorTablePanel = ExtractorTablePanel()
+    fun testVariableCellUsesTheChooserEditor() {
+        val started = EdtTestUtil.runInEdtAndGet<Boolean, RuntimeException> {
+            val panel = newPanel(listOf("token", "x-code"))
+            panel.bind(mutableListOf(ResponseExtractor(source = "data.code")))
+            panel.beginEdit(0, ExtractorTablePanel.VARIABLE_COLUMN) && panel.variableEditorField() != null
+        }
+
+        assertTrue(started)
+    }
+
+    fun testChoosingAnExistingVariableWritesItToTheRow() {
+        val row = ResponseExtractor(source = "data.code")
+        EdtTestUtil.runInEdtAndGet<Unit, RuntimeException> {
+            val panel = newPanel(listOf("token", "x-code"))
+            panel.bind(mutableListOf(row))
+            panel.chooseVariable(0, "x-code")
+        }
+
+        assertEquals("x-code", row.variable)
+    }
+
+    fun testBracedVariableNamesAreUnwrapped() {
+        val row = ResponseExtractor(source = "data.code")
+        EdtTestUtil.runInEdtAndGet<Unit, RuntimeException> {
+            val panel = newPanel()
+            panel.bind(mutableListOf(row))
+            panel.setRowVariable(0, "{{x-code}}")
+        }
+
+        assertEquals("x-code", row.variable)
+    }
+
+    fun testAskingForTheChooserKeepsTheEditorOpenAndFocused() {
+        var stillEditing = false
+        var focusStillInEditor = false
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            val panel = newPanel(listOf("token", "x-code"))
+            panel.bind(mutableListOf(ResponseExtractor(source = "data.code")))
+            val frame = JFrame("chooser").apply {
+                setSize(720, 260)
+                add(panel)
+                isVisible = true
+            }
+            try {
+                panel.tableView().setSize(680, 200)
+                panel.tableView().doLayout()
+                panel.beginEdit(0, ExtractorTablePanel.VARIABLE_COLUMN)
+                val field = panel.variableEditorField() ?: error("variable editor must be a text field")
+                field.requestFocusInWindow()
+                // Ctrl+Space asks for the variable list, exactly like a user would.
+                field.dispatchEvent(
+                    KeyEvent(
+                        field,
+                        KeyEvent.KEY_PRESSED,
+                        System.currentTimeMillis(),
+                        InputEvent.CTRL_DOWN_MASK,
+                        KeyEvent.VK_SPACE,
+                        KeyEvent.CHAR_UNDEFINED
+                    )
+                )
+                UIUtil.dispatchAllInvocationEvents()
+                stillEditing = panel.tableView().isEditing
+                focusStillInEditor = field.isFocusOwner
+            } finally {
+                frame.dispose()
+            }
+        }
+
+        assertTrue("the editor must stay open", stillEditing)
+        assertTrue("the editor must keep the keyboard focus", focusStillInEditor)
+    }
+
+    private fun newPanel(variableNames: List<String> = emptyList()): ExtractorTablePanel =
+        ExtractorTablePanel(variableNamesProvider = { variableNames })
 }

@@ -87,6 +87,8 @@
 把响应里的值自动存进当前环境的变量，实现“登录拿 token → 下一个请求带上 token”的串联。
 
 - 请求编辑器新增 `Extract` Tab：每条规则一行，`Variable` 是目标变量名，`Source` 是取值表达式。
+- 点开 `Variable` 单元格会直接列出当前环境里已有的变量，点一下就能复用（例如 `x-code`），不用再敲一遍；
+  也可以直接输入新名字，或按 `Ctrl+Space` / `Alt+↓` 或点右侧 `▾` 再次打开列表。输入 `{{x-code}}` 会自动去掉花括号。
 - 每次请求完成（含 4xx / 5xx）自动执行；也可以在 Tab 里点 `Run now`，用上一次缓存的响应重跑，不必重新发请求。
 - `Source` 语法：
 
@@ -365,7 +367,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（161 个）：
+当前测试覆盖（165 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL

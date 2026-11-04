@@ -1,9 +1,12 @@
 package dev.smartrequest.ui
 
+import com.intellij.openapi.ui.popup.JBPopup
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -16,13 +19,23 @@ import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Insets
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import javax.swing.AbstractCellEditor
+import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTable
+import javax.swing.JTextField
 import javax.swing.ListSelectionModel
+import javax.swing.SwingUtilities
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
+import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 
 /**
@@ -30,11 +43,13 @@ import javax.swing.table.TableCellRenderer
  *
  * The source is written as a small path expression (`data.token`, `data.items[0].id`, `headers.X-Request-Id`).
  * The variable name is filled in from the last path segment while it is still empty, so the common
- * case only needs one column to be typed.
+ * case only needs one column to be typed. Clicking the variable cell opens a list of the variables
+ * that already exist in the active environment, so re-using one does not mean typing it again.
  */
 class ExtractorTablePanel(
     private val onChanged: () -> Unit = {},
-    private val onRun: () -> Unit = {}
+    private val onRun: () -> Unit = {},
+    private val variableNamesProvider: () -> List<String> = { emptyList() }
 ) : JBPanel<ExtractorTablePanel>(BorderLayout()) {
 
     private var target: MutableList<ResponseExtractor>? = null
@@ -92,6 +107,7 @@ class ExtractorTablePanel(
             setDefaultRenderer(java.lang.Boolean::class.javaObjectType, CheckRenderer())
             setDefaultRenderer(String::class.java, TextRenderer())
             columnModel.getColumn(RESULT_COLUMN).cellRenderer = ResultRenderer()
+            columnModel.getColumn(VARIABLE_COLUMN).cellEditor = VariableCellEditor()
             selectionModel.addListSelectionListener { if (!it.valueIsAdjusting) updateButtons() }
             installSingleClickEditing(
                 onClick = { row, viewColumn -> viewColumn == CHECK_COLUMN && toggleEnabled(row) },
@@ -190,6 +206,16 @@ class ExtractorTablePanel(
     internal fun editingCell(): Pair<Int, Int>? =
         if (table.isEditing) table.editingRow to table.editingColumn else null
 
+    /** The text field of the open variable editor, or null when it is not the edited cell. */
+    internal fun variableEditorField(): JTextField? =
+        (table.cellEditor as? VariableCellEditor)?.takeIf { table.isEditing }?.textField()
+
+    /** Applies [name] to [row] the way choosing it from the variable list does. */
+    internal fun chooseVariable(row: Int, name: String) {
+        if (!beginEdit(row, VARIABLE_COLUMN)) return
+        (table.cellEditor as? VariableCellEditor)?.choose(name)
+    }
+
     private fun updateButtons() {
         removeButton.isEnabled = table.isEnabled && table.selectedRows.isNotEmpty()
         addButton.isEnabled = target != null
@@ -234,7 +260,7 @@ class ExtractorTablePanel(
             val extractor = rowAt(rowIndex) ?: return
             when (columnIndex) {
                 CHECK_COLUMN -> extractor.enabled = value == true
-                VARIABLE_COLUMN -> extractor.variable = value?.toString()?.trim().orEmpty()
+                VARIABLE_COLUMN -> extractor.variable = normalizeVariableInput(value?.toString().orEmpty())
                 SOURCE_COLUMN -> {
                     extractor.source = value?.toString()?.trim().orEmpty()
                     // While the name is still empty, follow the path so a path alone is enough.
@@ -245,6 +271,140 @@ class ExtractorTablePanel(
             }
             fireTableRowsUpdated(rowIndex, rowIndex)
             onChanged()
+        }
+    }
+
+    /**
+     * Cell editor for the variable column: a text field plus a small chooser that lists the
+     * variables already defined in the active environment. The chooser opens as soon as the cell is
+     * edited, so reusing `x-code` is one click instead of retyping it; typing dismisses the list and
+     * creates a new name as before.
+     */
+    private inner class VariableCellEditor : AbstractCellEditor(), TableCellEditor {
+
+        private val field = JBTextField()
+        private val component = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            add(field, BorderLayout.CENTER)
+            add(
+                JButton("▾").apply {
+                    toolTipText = "Choose a variable from the active environment"
+                    isFocusPainted = false
+                    isContentAreaFilled = false
+                    margin = Insets(0, 0, 0, 0)
+                    border = JBUI.Borders.empty(0, 2)
+                    preferredSize = Dimension(JBUI.scale(20), JBUI.scale(20))
+                    cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                    addActionListener { showChooser() }
+                },
+                BorderLayout.EAST
+            )
+        }
+        private var popup: JBPopup? = null
+        private var editRow = -1
+        private var loading = false
+
+        init {
+            field.border = BorderFactory.createEmptyBorder(0, JBUI.scale(6), 0, JBUI.scale(6))
+            field.document.addDocumentListener(object : DocumentListener {
+                override fun insertUpdate(e: DocumentEvent) = changed()
+                override fun removeUpdate(e: DocumentEvent) = changed()
+                override fun changedUpdate(e: DocumentEvent) = changed()
+
+                private fun changed() {
+                    if (loading || editRow < 0) return
+                    // Write through so the value survives when the editor is closed by something
+                    // else, and get out of the way as soon as a new name is typed.
+                    hideChooser()
+                    model.setValueAt(field.text, editRow, VARIABLE_COLUMN)
+                }
+            })
+            field.addActionListener {
+                if (!loading) stopCellEditing()
+            }
+            field.addKeyListener(object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    when {
+                        e.keyCode == KeyEvent.VK_ESCAPE -> cancelCellEditing()
+                        e.keyCode == KeyEvent.VK_SPACE && e.isControlDown -> {
+                            e.consume()
+                            showChooser()
+                        }
+                        e.keyCode == KeyEvent.VK_DOWN && e.isAltDown -> {
+                            e.consume()
+                            showChooser()
+                        }
+                    }
+                }
+            })
+        }
+
+        override fun getTableCellEditorComponent(
+            table: JTable,
+            value: Any?,
+            isSelected: Boolean,
+            row: Int,
+            column: Int
+        ): Component {
+            editRow = row
+            loading = true
+            try {
+                field.text = value?.toString().orEmpty()
+                field.font = table.font
+            } finally {
+                loading = false
+            }
+            SwingUtilities.invokeLater {
+                if (!component.isShowing) return@invokeLater
+                field.requestFocusInWindow()
+                field.selectAll()
+                showChooser()
+            }
+            return component
+        }
+
+        override fun getCellEditorValue(): Any = normalizeVariableInput(field.text)
+
+        override fun cancelCellEditing() {
+            hideChooser()
+            super.cancelCellEditing()
+        }
+
+        override fun stopCellEditing(): Boolean {
+            hideChooser()
+            return super.stopCellEditing()
+        }
+
+        /** Applies [name] exactly like choosing it in the list would. */
+        fun choose(name: String) {
+            // Called from the chooser callback, which closes the popup itself; dropping the reference
+            // first avoids cancelling it while it is still dispatching the callback.
+            popup = null
+            field.text = name
+            model.setValueAt(name, editRow, VARIABLE_COLUMN)
+            stopCellEditing()
+        }
+
+        fun textField(): JTextField = field
+
+        private fun showChooser() {
+            if (popup?.isVisible == true) return
+            val names = variableNamesProvider().distinct().sorted()
+            if (names.isEmpty() || !field.isShowing) return
+            val created = JBPopupFactory.getInstance()
+                .createPopupChooserBuilder(names)
+                .setTitle("Environment variables")
+                .setMovable(false)
+                .setResizable(false)
+                .setRequestFocus(false)
+                .setItemChosenCallback { name -> choose(name) }
+                .createPopup()
+            popup = created
+            created.showUnderneathOf(field)
+        }
+
+        private fun hideChooser() {
+            popup?.cancel()
+            popup = null
         }
     }
 
@@ -383,5 +543,17 @@ class ExtractorTablePanel(
 
         private val SUCCESS_COLOR = JBColor(0x1A7F37, 0x73BD79)
         private val ERROR_COLOR = JBColor(0xC7222D, 0xFF6B68)
+
+        /**
+         * Accepts the `{{name}}` form as well as a bare name: typing the braces is a natural
+         * mistake, and they can never be part of a variable name.
+         */
+        internal fun normalizeVariableInput(raw: String): String {
+            var text = raw.trim()
+            while (text.startsWith("{{") && text.endsWith("}}") && text.length > 4) {
+                text = text.substring(2, text.length - 2).trim()
+            }
+            return text
+        }
     }
 }

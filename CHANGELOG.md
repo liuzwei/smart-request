@@ -12,6 +12,8 @@
   - 路径语法：`data.a.b`、`data.items[0].id`、`data.items[-1].id`、`data["a.b"]`、
     `headers.X-Request-Id`、`status`、`statusText`。
   - 每次响应自动执行，也可用 `Run now` 对上一次响应重跑；变量留空时自动取路径末段命名。
+  - `Variable` 单元格编辑时直接列出当前环境已有变量，点选即可复用；支持 `Ctrl+Space` / `Alt+↓` / `▾`
+    重新打开列表，输入 `{{name}}` 会自动去掉花括号。
   - 同名变量更新（含重新启用），否则追加；`baseUrl` 保留；失败时不覆盖旧值。
   - 失败原因（路径不存在、`null`、非 JSON、截断、二进制）逐行显示。
 - 开源协议：Apache License 2.0（`LICENSE`），并补充 `NOTICE`、`DISCLAIMER.md`、`SECURITY.md`、

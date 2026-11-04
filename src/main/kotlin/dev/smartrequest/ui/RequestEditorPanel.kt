@@ -89,7 +89,12 @@ class RequestEditorPanel(
     )
     private val extractorsPanel: ExtractorTablePanel = ExtractorTablePanel(
         onChanged = { updateTabTitles() },
-        onRun = { runExtractNow() }
+        onRun = { runExtractNow() },
+        variableNamesProvider = {
+            variablesProvider().keys
+                .filter { it != dev.smartrequest.extract.ResponseExtractorEngine.RESERVED_VARIABLE }
+                .sorted()
+        }
     )
     private val tabs = JTabbedPane()
 
