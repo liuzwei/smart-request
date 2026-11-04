@@ -7,7 +7,9 @@ import dev.smartrequest.model.KeyValue
 import java.awt.GraphicsEnvironment
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
+import java.awt.event.MouseEvent
 import javax.swing.JFrame
+import javax.swing.JList
 import javax.swing.JTextField
 
 /**
@@ -78,5 +80,81 @@ class CellCompletionPopupTest : BasePlatformTestCase() {
         }
 
         assertEquals("Bearer {{token}}", stored)
+    }
+
+    fun testClickingAChooserEntryInsertsTheVariable() {
+        assertEquals("{{x-code}}", pickVariable("{{"))
+    }
+
+    fun testClickingAChooserEntryReplacesOnlyThePartialPrefix() {
+        assertEquals("Bearer {{x-code}}", pickVariable("Bearer {{"))
+    }
+
+    /** Types [initial], opens the chooser and clicks `x-code`; returns the resulting field text. */
+    private fun pickVariable(initial: String): String? {
+        var text: String? = null
+
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            val frame = JFrame("smart-request test")
+            try {
+                val panel = KeyValueTablePanel(variablesProvider = { mapOf("token" to "abc", "x-code" to "c") })
+                panel.bind(mutableListOf(KeyValue.of("X-Test", "")))
+                frame.contentPane.add(panel)
+                frame.setSize(700, 300)
+                frame.isVisible = true
+                panel.tableView().setSize(660, 240)
+                panel.tableView().doLayout()
+
+                panel.beginEdit(0, 2)
+                val field = panel.tableView().editorComponent as VariableTextField
+                field.text = initial
+                field.caretPosition = initial.length
+                field.dispatchEvent(
+                    KeyEvent(
+                        field,
+                        KeyEvent.KEY_PRESSED,
+                        System.currentTimeMillis(),
+                        InputEvent.CTRL_DOWN_MASK,
+                        KeyEvent.VK_SPACE,
+                        KeyEvent.CHAR_UNDEFINED
+                    )
+                )
+                UIUtil.dispatchAllInvocationEvents()
+
+                val list = findList(field.completionContent()) ?: error("chooser list not found")
+                val index = (0 until list.model.size).first { list.model.getElementAt(it) == "x-code" }
+                val bounds = list.getCellBounds(index, index)
+                list.dispatchEvent(clickEvent(list, bounds.x + 4, bounds.y + bounds.height / 2, MouseEvent.MOUSE_PRESSED))
+                list.dispatchEvent(clickEvent(list, bounds.x + 4, bounds.y + bounds.height / 2, MouseEvent.MOUSE_RELEASED))
+                UIUtil.dispatchAllInvocationEvents()
+                text = field.text
+            } finally {
+                frame.dispose()
+            }
+        }
+
+        return text
+    }
+
+    private fun clickEvent(list: JList<*>, x: Int, y: Int, id: Int): MouseEvent = MouseEvent(
+        list,
+        id,
+        System.currentTimeMillis(),
+        0,
+        x,
+        y,
+        1,
+        false,
+        MouseEvent.BUTTON1
+    )
+
+    private fun findList(component: java.awt.Component?): JList<*>? {
+        if (component is JList<*>) return component
+        if (component is java.awt.Container) {
+            component.components.forEach { child ->
+                findList(child)?.let { return it }
+            }
+        }
+        return null
     }
 }

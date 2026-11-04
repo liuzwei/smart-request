@@ -63,8 +63,23 @@ class VariableTextSupport(
 
     private val focusListener = object : java.awt.event.FocusAdapter() {
         override fun focusLost(e: java.awt.event.FocusEvent) {
-            hidePopup()
+            // A click inside the chooser can move the focus to the popup window for a moment.
+            // Hiding the popup right there cancels it before the click is delivered, which made
+            // picking a variable in the Params / Path Params tables do nothing at all.
+            SwingUtilities.invokeLater {
+                if (!component.isFocusOwner && !isPopupFocused()) hidePopup()
+            }
         }
+    }
+
+    private fun isPopupFocused(): Boolean {
+        val current = popup ?: return false
+        if (!current.isVisible) return false
+        // getContent() is @NotNull but throws on a popup that is already disposed.
+        val content = runCatching { current.content }.getOrNull() ?: return false
+        val focusOwner = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+            ?: return false
+        return SwingUtilities.isDescendingFrom(focusOwner, content)
     }
 
     init {
@@ -148,20 +163,31 @@ class VariableTextSupport(
     /** True while the variable chooser is on screen; used by the cell editor tests. */
     internal fun isPopupVisible(): Boolean = popup?.isVisible == true
 
+    /** The chooser content, used by tests that exercise picking an entry. */
+    internal fun popupContent(): javax.swing.JComponent? = popup?.content
+
     private fun insertVariable(name: String) {
         val text = component.text
         val caret = component.caretPosition.coerceIn(0, text.length)
         val before = text.substring(0, caret)
-        val partial = Regex("""\{\{[A-Za-z0-9_.-]*$""").find(before)
-        if (partial != null) {
-            component.select(partial.range.first, caret)
+        val partial = PARTIAL_PATTERN.find(before)
+        val start = partial?.range?.first ?: caret
+        val inserted = "{{$name}}"
+        val document = component.document
+        // Edit the document directly instead of replacing the selection: the chooser may be
+        // confirmed after the field lost focus (or its selection), and a stale selection would
+        // overwrite the wrong range.
+        runCatching {
+            document.remove(start, caret - start)
+            document.insertString(start, inserted, null)
         }
-        component.replaceSelection("{{$name}}")
+        component.caretPosition = (start + inserted.length).coerceAtMost(document.length)
         component.requestFocusInWindow()
         refresh()
     }
 
     companion object {
+        private val PARTIAL_PATTERN = Regex("""\{\{[A-Za-z0-9_.-]*$""")
         private val KNOWN_BACKGROUND = JBColor(0xE1EDFF, 0x2C405B)
         private val UNKNOWN_BACKGROUND = JBColor(0xFFE0E0, 0x4A2B2B)
         private val PATH_BACKGROUND = JBColor(0xE3F4E3, 0x2D4A2D)
@@ -186,6 +212,9 @@ class VariableTextField(
 
     /** True while the variable chooser is on screen; used by the cell editor tests. */
     internal fun isCompletionVisible(): Boolean = support.isPopupVisible()
+
+    /** The chooser content, used by tests that exercise picking an entry. */
+    internal fun completionContent(): javax.swing.JComponent? = support.popupContent()
 }
 
 class VariableTextArea(variablesProvider: () -> Map<String, String>) : JBTextArea() {
