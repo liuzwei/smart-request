@@ -1,6 +1,7 @@
 package dev.smartrequest.ui
 
 import com.intellij.testFramework.EdtTestUtil
+import com.intellij.testFramework.assertNoErrorLogged
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import dev.smartrequest.http.HttpResponseData
 import java.awt.Container
@@ -67,6 +68,65 @@ class ResponseJsonEditorUiTest : BasePlatformTestCase() {
             EdtTestUtil.runInEdtAndWait<RuntimeException> { frame.dispose() }
         }
     }
+
+    fun testShowingAnotherResponseAfterFoldsWereInstalledDoesNotFail() {
+        val panel = EdtTestUtil.runInEdtAndGet<ResponsePanel, RuntimeException> {
+            ResponsePanel(project).apply {
+                setSize(560, 520)
+                show(jsonResponse("""{"a":{"b":1},"list":[1,2,3]}"""))
+            }
+        }
+        val frame = EdtTestUtil.runInEdtAndGet<JFrame, RuntimeException> {
+            JFrame("response").apply {
+                setSize(560, 540)
+                add(panel)
+                isVisible = true
+            }
+        }
+        try {
+            // Let installManualFolds() run for the first response, then replace the body twice.
+            Thread.sleep(1200)
+            val foldButton = EdtTestUtil.runInEdtAndGet<JButton, RuntimeException> {
+                findButton(panel, "Fold") ?: error("Fold button not found")
+            }
+            EdtTestUtil.runInEdtAndWait<RuntimeException> {
+                if (panel.manualFoldCountForTest() == 0) foldButton.doClick()
+            }
+            Thread.sleep(300)
+            assertTrue(
+                "expected installed fold regions",
+                EdtTestUtil.runInEdtAndGet<Boolean, RuntimeException> {
+                    panel.manualFoldCountForTest() > 0
+                }
+            )
+            EdtTestUtil.runInEdtAndWait<RuntimeException> {
+                assertNoErrorLogged {
+                    panel.show(jsonResponse("""{"c":{"d":2},"list":[4,5,6]}"""))
+                }
+            }
+            Thread.sleep(500)
+            EdtTestUtil.runInEdtAndWait<RuntimeException> {
+                assertNoErrorLogged {
+                    panel.show(jsonResponse("""{"e":{"f":3}}"""))
+                }
+            }
+            Thread.sleep(300)
+        } finally {
+            EdtTestUtil.runInEdtAndWait<RuntimeException> { frame.dispose() }
+        }
+    }
+
+    private fun jsonResponse(body: String): HttpResponseData = HttpResponseData(
+        statusCode = 200,
+        statusText = "OK",
+        headers = listOf("Content-Type" to "application/json; charset=utf-8"),
+        body = body,
+        bodyBytes = body.length.toLong(),
+        durationMs = 42,
+        contentType = "application/json; charset=utf-8",
+        truncated = false,
+        textual = true
+    )
 
     private fun findButton(component: Container, text: String): JButton? {
         if (component is JButton && component.text == text) return component

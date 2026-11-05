@@ -392,7 +392,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（299 个）：
+当前测试覆盖（300 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -408,6 +408,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 从 DTO 字段生成 Body：嵌套对象、集合、枚举、Swagger example/name、从查询参数生成 JSON
 - cURL 生成：Linux/PowerShell、单引号转义、HEAD、重定向参数
 - 响应 JSON 编辑器：折叠/展开、搜索高亮与 `1/N` 计数
+- 响应折叠回归：连续显示多个响应时手动折叠区域在批量事务内移除，不再触发 FoldingModel 错误
 - 长响应体的滚动：滚动条在需要时可见、拖动/滚轮能滚动到响应末尾
 - 类/方法 Gutter 图标存在性
 - Controller 分组导入的创建、幂等更新、保留用户已填值

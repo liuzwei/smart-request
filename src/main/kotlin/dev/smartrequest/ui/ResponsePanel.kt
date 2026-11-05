@@ -152,6 +152,8 @@ class ResponsePanel(
 
     /** The response currently displayed, if any; used by the scenario response viewer tests. */
     internal fun responseForTest(): HttpResponseData? = lastResponse
+
+    internal fun manualFoldCountForTest(): Int = manualFoldRegions.size
     private val manualFoldRegions = ArrayList<com.intellij.openapi.editor.FoldRegion>()
     private val extractionModel = ExtractionModel()
     private val extractionTable = JBTable(extractionModel).apply {
@@ -617,10 +619,16 @@ class ResponsePanel(
     }
 
     private fun clearManualFolds(editor: com.intellij.openapi.editor.Editor) {
-        manualFoldRegions.forEach { region ->
-            runCatching { editor.foldingModel.removeFoldRegion(region) }
-        }
+        val regions = manualFoldRegions.toList()
         manualFoldRegions.clear()
+        if (regions.isEmpty()) return
+        // FoldingModel requires additions *and* removals to happen in one batch; outside a batch it
+        // logs "Fold regions must be added or removed inside batchFoldProcessing() only."
+        editor.foldingModel.runBatchFoldingOperation {
+            regions.forEach { region ->
+                runCatching { editor.foldingModel.removeFoldRegion(region) }
+            }
+        }
     }
 
     private data class JsonFold(val start: Int, val end: Int, val placeholder: String)

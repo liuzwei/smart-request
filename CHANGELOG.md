@@ -63,6 +63,9 @@
 
 ### Fixed
 
+- 场景 `Response` Tab 连续查看多个步骤的响应时，`ResponsePanel` 在折叠批量事务外移除上一个 JSON 的手动折叠区域，
+  IDEA 2026.2 会记录 `Fold regions must be added or removed inside batchFoldProcessing() only.`。
+  现在手动折叠的移除也放在 `runBatchFoldingOperation` 内，并加了回归测试（`assertNoErrorLogged`）。
 - Params / Path Params 单元格里的变量补全能弹出但“选不中”：弹窗获得焦点时不再被立即关闭；选中后直接
   修改文档，并按当前位置的部分变量名计算插入区间，不再依赖编辑器选区。
 
