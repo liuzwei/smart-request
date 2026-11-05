@@ -454,10 +454,6 @@ class ScenarioRunPanel(
 
     internal fun isCancelVisible(): Boolean = cancelButton.isVisible
 
-    internal fun isShowingResults(): Boolean = cards.isVisible && rows.isNotEmpty()
-
-    internal fun selectedTabCard(): String = if (rows.isEmpty()) CARD_EMPTY else CARD_RESULTS
-
     companion object {
         private const val CARD_EMPTY = "empty"
         private const val CARD_RESULTS = "results"

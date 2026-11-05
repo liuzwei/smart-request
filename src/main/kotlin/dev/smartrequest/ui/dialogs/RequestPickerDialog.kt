@@ -136,8 +136,6 @@ class RequestPickerDialog(
         return request
     }
 
-    internal fun filterText(): String = searchField.text
-
     private data class Choice(val request: HttpRequestConfig, val groupName: String)
 
     private class RequestRenderer : javax.swing.DefaultListCellRenderer() {

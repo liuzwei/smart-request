@@ -443,8 +443,6 @@ class ScenarioInspectorPanel(
 
     internal fun message(): String? = messageLabel.text.takeIf { it.isNotEmpty() }
 
-    internal fun isShowingNode(): Boolean = node != null
-
     private fun simpleListener(action: () -> Unit): DocumentListener = object : DocumentListener {
         override fun insertUpdate(e: DocumentEvent) = action()
         override fun removeUpdate(e: DocumentEvent) = action()
@@ -463,7 +461,5 @@ class ScenarioInspectorPanel(
         private const val TIMEOUT_HINT = "Empty = project default"
         private const val OUTPUTS_HINT =
             "Captures are JSONPath rules (data.token, headers.X-Request-Id); downstream steps use {{name}}."
-
-        internal fun describe(expression: String): String = StatusExpectation.describe(expression)
     }
 }

@@ -222,6 +222,7 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
             respond(exchange, """{"ok":true,"query":"$query"}""")
         }
         server.start()
+        val originalBaseUrl = onEdtGet { service().state().environments.first().baseUrl }
         onEdt {
             service().state().environments.first().baseUrl = "http://127.0.0.1:${server.address.port}"
             service().notifyChanged()
@@ -253,6 +254,10 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         } finally {
             onEdt { panel.dispose() }
             server.stop(0)
+            onEdt {
+                service().state().environments.first().baseUrl = originalBaseUrl
+                service().notifyChanged()
+            }
         }
     }
 
