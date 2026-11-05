@@ -222,6 +222,36 @@ class ExtractorTablePanelTest : BasePlatformTestCase() {
         assertTrue("the editor must keep the keyboard focus", focusStillInEditor)
     }
 
+    fun testRequiredColumnIsOnlyShownWhenRequested() {
+        val (plainHeaders, scenarioHeaders) = EdtTestUtil.runInEdtAndGet<Pair<List<String>, List<String>>, RuntimeException> {
+            val plain = newPanel()
+            val scenario = ExtractorTablePanel(showRequired = true)
+            val plainHeaders = (0 until plain.tableView().columnModel.columnCount).map {
+                plain.tableView().columnModel.getColumn(it).headerValue.toString()
+            }
+            val scenarioHeaders = (0 until scenario.tableView().columnModel.columnCount).map {
+                scenario.tableView().columnModel.getColumn(it).headerValue.toString()
+            }
+            plainHeaders to scenarioHeaders
+        }
+
+        assertEquals(listOf("", "Variable", "Source", "Last run"), plainHeaders)
+        assertEquals(listOf("", "Required", "Variable", "Source", "Last run"), scenarioHeaders)
+    }
+
+    fun testRequiredFlagCanBeToggledPerRule() {
+        val row = ResponseExtractor(variable = "token", source = "data.token")
+        EdtTestUtil.runInEdtAndGet<Unit, RuntimeException> {
+            val panel = ExtractorTablePanel(showRequired = true)
+            panel.bind(mutableListOf(row))
+            assertTrue(panel.requiredForTest(0) == true)
+            panel.toggleRequired(0)
+            assertFalse(panel.requiredForTest(0) == true)
+            panel.toggleRequired(0)
+            assertTrue(panel.requiredForTest(0) == true)
+        }
+    }
+
     private fun newPanel(variableNames: List<String> = emptyList()): ExtractorTablePanel =
         ExtractorTablePanel(variableNamesProvider = { variableNames })
 }

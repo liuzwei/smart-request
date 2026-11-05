@@ -132,6 +132,7 @@ class ScenarioEditorPanel(
         onCancel = { cancelRun() },
         onSelectNode = { nodeId -> selectFromRunPanel(nodeId) }
     )
+    private val responsePanel = ResponsePanel(project)
 
     private val stepsToggle = JToggleButton("Steps", true).apply {
         isFocusPainted = false
@@ -173,7 +174,8 @@ class ScenarioEditorPanel(
         onAddStep = { addStep() },
         onBeforeEdit = { recordHistory() },
         onGraphChanged = { structureChanged() },
-        onHint = { message -> updateGraphHint(message) }
+        onHint = { message -> updateGraphHint(message) },
+        onRequestDropped = { requestId, x, y -> addRequestAt(requestId, x, y) }
     )
 
     private val parametersPanel = KeyValueTablePanel(
@@ -185,6 +187,7 @@ class ScenarioEditorPanel(
         addTab("Step", inspector)
         addTab("Parameters", wrapParametersPanel())
         addTab("Run", runPanel)
+        addTab("Response", responsePanel)
     }
 
     private val stateListener: () -> Unit = {
@@ -375,7 +378,18 @@ class ScenarioEditorPanel(
         currentNodeId = nodeId
         if (disposed) return
         inspector.bind(scenario, nodeId)
+        updateResponseView(nodeId)
         if (nodeId != null && switchTab) bottomTabs.selectedIndex = 0
+    }
+
+    /** Shows the retained response of [nodeId] in the Response tab, when the last run has one. */
+    private fun updateResponseView(nodeId: String?) {
+        val response = nodeId?.let { lastRun?.nodes?.get(it)?.response }
+        if (response != null) {
+            responsePanel.show(response)
+        } else {
+            responsePanel.showEmptyState()
+        }
     }
 
     private fun onStepsSelection(nodeId: String?) {
@@ -549,6 +563,28 @@ class ScenarioEditorPanel(
         }
         structureChanged()
         stepsTable.selectNode(node.id)
+    }
+
+    /** Adds a step dropped from the request tree at the canvas coordinates. */
+    private fun addRequestAt(requestId: String, x: Int, y: Int) {
+        val current = scenario ?: return
+        val request = service.findRequest(requestId)
+        if (request == null) {
+            updateGraphHint("That request no longer exists.")
+            return
+        }
+        recordHistory()
+        val node = ScenarioGraph.addRequestNode(current, request.id, afterNodeId = null)
+        node.x = x
+        node.y = y
+        if (node.outputs.isEmpty()) {
+            node.outputs.addAll(request.extractors.map { it.deepCopy() })
+        }
+        structureChanged()
+        stepsTable.selectNode(node.id)
+        graphCanvas.selectNodeSilently(node.id)
+        showNode(node.id)
+        updateGraphHint("Step added")
     }
 
     private fun removeStep(nodeId: String) {
@@ -778,6 +814,7 @@ class ScenarioEditorPanel(
         )
 
         lastRun = null
+        updateResponseView(currentNodeId)
         stepsTable.clearResults()
         graphCanvas.startRun(current)
         runPanel.startRun(current)
@@ -828,6 +865,7 @@ class ScenarioEditorPanel(
         lastRun = result
         activeRun = null
         stepsTable.setResults(result.nodes)
+        updateResponseView(currentNodeId)
         runPanel.finish(result)
         graphCanvas.setRunResults(result.nodes)
         val client = runClient
@@ -881,6 +919,8 @@ class ScenarioEditorPanel(
     internal fun inspectorForTest(): ScenarioInspectorPanel = inspector
 
     internal fun runPanelForTest(): ScenarioRunPanel = runPanel
+
+    internal fun responsePanelForTest(): ResponsePanel = responsePanel
 
     internal fun graphCanvasForTest(): ScenarioGraphCanvas = graphCanvas
 

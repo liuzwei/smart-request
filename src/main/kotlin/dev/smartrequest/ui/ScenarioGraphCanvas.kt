@@ -20,6 +20,7 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
 import java.awt.RenderingHints
+import java.awt.datatransfer.DataFlavor
 import java.awt.event.ActionEvent
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
@@ -39,6 +40,7 @@ import javax.swing.JPopupMenu
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import javax.swing.ToolTipManager
+import javax.swing.TransferHandler
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -66,7 +68,9 @@ class ScenarioGraphCanvas(
     private val onAddStep: () -> Unit,
     private val onBeforeEdit: () -> Unit,
     private val onGraphChanged: () -> Unit,
-    private val onHint: (String?) -> Unit = {}
+    private val onHint: (String?) -> Unit = {},
+    /** A request dropped from the request tree; coordinates are world (model) pixels. */
+    private val onRequestDropped: (requestId: String, x: Int, y: Int) -> Unit = { _, _, _ -> }
 ) : JComponent() {
 
     private var zoom = 1.0
@@ -113,6 +117,33 @@ class ScenarioGraphCanvas(
             override fun componentResized(event: ComponentEvent) = fitOnFirstShow()
             override fun componentShown(event: ComponentEvent) = fitOnFirstShow()
         })
+        transferHandler = object : TransferHandler() {
+            override fun getSourceActions(component: JComponent?): Int = TransferHandler.NONE
+
+            override fun canImport(support: TransferHandler.TransferSupport): Boolean {
+                if (!support.isDataFlavorSupported(DataFlavor.stringFlavor)) return false
+                return runCatching {
+                    val text = support.transferable.getTransferData(DataFlavor.stringFlavor) as? String
+                    RequestDragData.decode(text) != null
+                }.getOrDefault(false)
+            }
+
+            override fun importData(support: TransferHandler.TransferSupport): Boolean {
+                val text = runCatching {
+                    support.transferable.getTransferData(DataFlavor.stringFlavor) as? String
+                }.getOrNull() ?: return false
+                val requestId = RequestDragData.decode(text) ?: return false
+                val drop = support.dropLocation ?: return false
+                val point = drop.dropPoint
+                val world = world(point.x.toDouble(), point.y.toDouble())
+                onRequestDropped(
+                    requestId,
+                    (world.x - NODE_WIDTH / 2).roundToInt(),
+                    (world.y - NODE_HEIGHT / 2).roundToInt()
+                )
+                return true
+            }
+        }
         installKeyBindings()
     }
 
@@ -1018,6 +1049,11 @@ class ScenarioGraphCanvas(
     internal fun edgeDragForTest(sourceId: String, targetId: String): Boolean = connect(sourceId, targetId)
 
     internal fun nodeIdAtForTest(x: Int, y: Int): String? = nodeAt(Point(x, y))?.id
+
+    /** Applies a drop without a Swing drag gesture, at model coordinates. */
+    internal fun dropRequestForTest(requestId: String, worldX: Int, worldY: Int) {
+        onRequestDropped(requestId, worldX, worldY)
+    }
 
     private data class Curve(val path: Path2D.Double, val control1: Point2D, val control2: Point2D)
 

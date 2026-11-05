@@ -1,6 +1,6 @@
 # Scenario Orchestration (Scenarios) — Implementation Plan
 
-Status: P1 (model + validation + engine), P2 (persistence, list, steps editor, run panel) and P3 (graph canvas, undo/redo, layout) implemented; P4 (polish) next.
+Status: P1–P4 implemented. The feature is ready for hands-on testing; see §11 for the acceptance status of each phase.
 
 Confirmed decisions:
 
@@ -65,13 +65,15 @@ class ScenarioNode(
     var y: Int = 0,
     var expectStatus: String = "",          // see §5.3
     var timeoutMs: Int? = null,             // null = project default
-    var outputs: MutableList<ResponseExtractor> = mutableListOf()
+    var outputs: MutableList<ResponseExtractor> = mutableListOf(),
+    var retries: Int = 0                    // extra attempts, 0..5
 )
 ```
 
 - `kind` is a string for XML stability (same convention as `HttpRequestConfig.bodyType`).
 - Exactly one `START` and one `END` per scenario; both are real nodes with coordinates, which keeps drag/delete/topology code uniform.
 - `outputs` are seeded from `request.extractors` when the node is created and are then owned by the node. The inspector offers "Sync from request". Reusing `ResponseExtractor` means the existing variable picker and JSONPath validation apply unchanged.
+- `ResponseExtractor.required` (default true) is only meaningful for scenario captures: a failed optional rule no longer fails the node, and the failed value is not passed downstream. The single-request Extract tab keeps the compact four-column layout and ignores the flag.
 - `expectStatus` is what makes error-path testing possible under fail-fast: a node that expects `404` passes on 404.
 
 ### 3.3 Edge
@@ -174,11 +176,11 @@ A node is `PASSED` when **all** of the following hold:
    - `404` → exactly 404
    - `200-299` → inclusive range
    - `200,201,204` → any of the listed codes
-3. every enabled output rule evaluated without error.
+3. every enabled **required** output rule evaluated without error; failed optional rules are recorded in the node result but do not fail it.
 
 Otherwise `FAILED` with a one-line reason (`Unresolved variables: tenantId`, `Expected 200, got 500`, `Header 'X-Request-Id' is not present`, `Request timed out`).
 
-Output rules are required in v1: a failed rule fails the node, because downstream data would otherwise be stale or missing. A per-rule "optional" flag is a later addition.
+A node with `retries > 0` repeats the send on failure (transport error, status mismatch or required capture failure) immediately, up to `retries` extra attempts. The final failure message gets `(after N attempts)`, and the node duration covers all attempts. Successful optional values are passed downstream; failed optional values are never written to the run scope.
 
 ### 5.4 Isolation and snapshots
 
@@ -327,6 +329,13 @@ Shown when the scenario has parameters or when validation found variables that m
 - Table: node, status, HTTP status, duration, captured values (red for failures, dashed for skipped).
 - Footer: final variable table (name, value, producer node), copyable.
 - The panel keeps the last run in memory; it is cleared when a new run starts or the editor is closed.
+- Clicking a result row selects the node in the graph and the steps table.
+
+### 8.6 Response viewer
+
+- A `Response` tab next to `Run` shows the response retained for the selected step: status, headers and body, through the same read-only `ResponsePanel` used by the request editor.
+- The data comes from `ScenarioRunResult.nodes[nodeId].response`; nothing is re-sent. Selecting another step updates the tab; before the first run (or for a step without a response) it shows the empty state.
+- The run panel and steps table are unchanged; the response is an extra view over the same run result.
 
 ## 9. Integration changes
 
@@ -339,16 +348,20 @@ Shown when the scenario has parameters or when validation found variables that m
 | `scenario/ScenarioGraph.kt` | dependency editing, Start/End edge maintenance, cycle rejection, display order, `dependencyError` for live canvas hints |
 | `scenario/ScenarioLayout.kt` | longest-path layering + barycenter auto layout |
 | `scenario/ScenarioHistory.kt` | node/edge snapshot undo/redo (50 steps) |
+| `scenario/ScenarioJson.kt` | self-contained JSON export/import (requests, groups, outputs, retries) |
+| `scenario/ScenarioImporter.kt` | creates requests/groups, remaps nodes and edges on import |
 | `scenario/ScenarioValidator.kt` | pure validation (§4), including `missingVariables` for the run dialog |
-| `scenario/ScenarioRunner.kt` | scheduler, run scope, results (§5–§7) |
-| `ui/ScenarioListPanel.kt` | tool window list |
-| `ui/ScenarioEditorPanel.kt` | header, Steps/Graph switch, inspector, run panel, validation banner, undo/redo, run lifecycle |
+| `scenario/ScenarioRunner.kt` | scheduler, run scope, retries, optional captures, results (§5–§7) |
+| `ui/ScenarioListPanel.kt` | tool window list, JSON export/import |
+| `ui/ScenarioEditorPanel.kt` | header, Steps/Graph switch, inspector, run panel, Response tab, validation banner, undo/redo, run lifecycle |
 | `ui/ScenarioStepsTable.kt` | P2 table view, dependency column, live run status |
-| `ui/ScenarioGraphCanvas.kt` | P3 canvas: painting, hit testing, drag, ports, edges, zoom/pan, fit, auto layout, run states |
-| `ui/ScenarioInspectorPanel.kt` | request/dependencies/expect status/timeout/outputs |
+| `ui/ScenarioGraphCanvas.kt` | P3 canvas: painting, hit testing, drag, ports, edges, zoom/pan, fit, auto layout, run states, request drops |
+| `ui/ScenarioInspectorPanel.kt` | request/dependencies/expect status/timeout/retries/outputs (required column) |
 | `ui/ScenarioRunPanel.kt` | results and final variables |
 | `ui/dialogs/ScenarioRunDialog.kt` | environment + parameters + missing variables |
 | `ui/dialogs/RequestPickerDialog.kt` | searchable, group-aware request picker for new steps |
+| `ui/RequestDragData.kt`, `ui/RequestTreePanel.kt` | request-tree drag source and payload |
+| `ui/ResponsePanel.kt` | read-only response viewer reused by the Response tab |
 | `ui/ScenarioEditorProvider.kt`, `ui/ScenarioFileType.kt`, `ui/ScenarioEditorService.kt` | editor tab plumbing and tab reuse |
 | `ui/SmartRequestPanel.kt` | subscribe to the "open request" topic; toolbar entry "Scenarios" |
 | `scenario/ScenarioTopics.kt` | cross-surface "open request" message-bus topic |
@@ -378,15 +391,18 @@ Engine tests need no network and no sleeping:
 - `ScenarioGraphTest`: append/parallel/rewire/delete, terminal maintenance, cycle rejection, display order, ancestors/descendants, grid coordinates.
 - `ScenarioLayoutTest`: linear/branch/join layering, deterministic output, no two nodes on the same spot.
 - `ScenarioHistoryTest`: undo/redo restores nodes, positions and outputs, limit, redo clearing, rejected-edit discard.
+- `ScenarioJsonTest`: self-contained round-trip, deterministic output, escaping/unicode, invalid format/version/JSON, defaults, missing request.
+- `ScenarioImporterTest`: request/group creation, id remapping, duplicate import independence, unknown keys, blank group.
 - `ScenarioServiceTest`: create/rename/delete/duplicate (fresh node, edge and output ids), unique names, node ownership.
 - UI tests (`BasePlatformTestCase`, like the existing table tests):
-  - `ScenarioEditorUiTest`: tab reuse/rename/close, add steps, inspector dependency editing and cycle rejection, expect-status validation, output seeding, Parameters tab feeding defaults/validation, run wired to a fake transport, end-to-end run against a local `HttpServer`, Steps/Graph selection sync, canvas undo/redo, dependency edits visible in both views, graph run-state painting and run-panel selection;
-  - `ScenarioStepsTableTest` is covered by the same editor test through the `stepsTableForTest()` hooks;
+  - `ScenarioEditorUiTest`: tab reuse/rename/close, add steps, inspector dependency editing and cycle rejection, expect-status/retry validation, output seeding and required toggling, Parameters tab feeding defaults/validation, run wired to a fake transport, end-to-end run against a local `HttpServer`, Steps/Graph selection sync, canvas undo/redo, dependency edits visible in both views, graph run-state painting, run-panel selection, Response tab, request drop on the canvas;
   - `ScenarioGraphCanvasUiTest`: fit/hit testing, real mouse port-to-port edge creation, invalid edge rejection, delete/START protection, zoom/pan, auto layout, run-state painting, edge hit testing;
-  - `ScenarioListPanelUiTest`: create/filter/duplicate/delete, action enablement;
+  - `ScenarioListPanelUiTest`: create/filter/duplicate/delete, action enablement, JSON export/import through the panel;
   - `ScenarioRunDialogUiTest`: parameter prefill, missing variables, environment selection, structural errors;
   - `ScenarioRunPanelUiTest`: live statuses, final summary, skipped rows, producer labels;
   - `RequestPickerDialogUiTest`: filtering by name/method and selection;
+  - `RequestDragDataTest`: drag payload encoding/decoding;
+  - `ExtractorTablePanelTest`: optional Required column shown only for scenarios, per-row toggle;
   - `HttpTransportTest`: one shared client sends several requests.
 
 Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"`.
@@ -421,11 +437,13 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 
 ### P4 — polish
 
-- [ ] Node response viewer (read-only, from the retained response).
-- [ ] Export/import scenario as JSON (sharing outside `.idea`).
-- [ ] Drag requests from the request tree into the canvas.
-- [ ] Optional per-output "required = false" and retry count.
-- [ ] README/CHANGELOG/plugin description updates.
+- [x] Node response viewer (read-only, from the retained response).
+- [x] Export/import scenario as JSON (sharing outside `.idea`).
+- [x] Drag requests from the request tree into the canvas.
+- [x] Optional per-output "required = false" and retry count.
+- [x] README/CHANGELOG/plugin description updates.
+- Acceptance: import a scenario exported from another project, see its requests and flow, run it; a failed optional capture does not stop the flow; a flaky step succeeds after its retries; a dropped request becomes a step at the drop point.
+  Covered by `ScenarioJsonTest`, `ScenarioImporterTest`, `ScenarioListPanelUiTest`, `ScenarioRunnerTest` (retries/optional), `ScenarioEditorUiTest` (Response tab and request drop).
 
 ## 12. Risks and later work
 
@@ -433,11 +451,13 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 - **Undo stack scope**: snapshots contain nodes and edges (positions, captures, dependencies), not scenario parameters or the name. A rejected dependency edit is rolled back out of the stack. The stack is in-memory per editor tab and is dropped when the tab closes.
 - **Semantics edge cases** concentrate in joins/fail-fast/cancel; model them as a table of tests, one per rule.
 - **No failure branches in v1** means error-path flows cannot be expressed as branches; `expectStatus` covers "this 404 is expected". If needed, add `EdgeCondition` later without migration.
-- **`.idea` sharing**: scenarios live next to request definitions and are not shared by default; P4 adds export/import.
+- **`.idea` sharing**: scenarios live next to request definitions and are not shared by default. P4 exports a self-contained JSON (requests, groups, outputs, retries, positions) and imports it into new requests/scenarios; it does not merge or update existing requests.
 - **Deleted requests**: nodes keep the id and are reported; no silent data loss.
 - **Parallel duplicate writes**: warned at validation, last write wins at run time (producer is recorded).
+- **Optional captures**: a failed optional capture does not fail the node, but downstream requests that still use that variable will fail with an unresolved variable; this is intentional (the flow author decides whether the value is required).
+- **Retries**: retries are immediate (no backoff) and each attempt gets the node timeout, so a run can take `(retries + 1) × timeout` for that node. This is documented in the inspector tooltip and keeps the engine simple.
 - **Memory**: the last run keeps one `HttpResponseData` per node (bodies already capped at 5 MB); cleared on the next run or when the editor closes.
 - **Threads**: a run owns two daemon thread pools; `ScenarioEditorPanel.dispose()` cancels the active run and shuts the shared client down (verified in the editor tests), so closing the tab does not leave pools or sockets behind.
 - **Editor tab handle**: 2026.2 no longer ships a production `LightVirtualFile`, so the tab is backed by an empty file in the IDE temp directory. The file is read-only and never holds data; renaming the scenario renames the file and updates the tab. Temp files are left in place when a scenario is deleted (they are empty and tiny); a later cleanup can remove the directory on project close.
 - **Run scope is intentionally transient**: the last run (including response bodies) lives only in the editor; closing the tab drops it. A future run-history feature would need its own storage decision.
-- **Later candidates**: failure branches, assertion nodes, `foreach` sub-flows, retries/delays, JSON export, JUnit export, run history, CI runner.
+- **Later candidates**: failure branches, assertion nodes, `foreach` sub-flows, retry delays/backoff, JUnit export, run history, CI runner, explicit request matching/merging on JSON import.

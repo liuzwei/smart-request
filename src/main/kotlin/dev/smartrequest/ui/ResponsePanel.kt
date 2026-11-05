@@ -149,6 +149,9 @@ class ResponsePanel(
     private var matches: List<IntRange> = emptyList()
     private var currentMatch = -1
     private val searchHighlighters = ArrayList<RangeHighlighter>()
+
+    /** The response currently displayed, if any; used by the scenario response viewer tests. */
+    internal fun responseForTest(): HttpResponseData? = lastResponse
     private val manualFoldRegions = ArrayList<com.intellij.openapi.editor.FoldRegion>()
     private val extractionModel = ExtractionModel()
     private val extractionTable = JBTable(extractionModel).apply {

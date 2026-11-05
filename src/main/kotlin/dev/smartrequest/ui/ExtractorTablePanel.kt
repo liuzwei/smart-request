@@ -52,12 +52,22 @@ class ExtractorTablePanel(
     private val variableNamesProvider: () -> List<String> = { emptyList() },
     private val showRunButton: Boolean = true,
     hintText: String = HINT,
-    hintToolTip: String = STORAGE_HINT
+    hintToolTip: String = STORAGE_HINT,
+    /**
+     * Scenario nodes can mark a rule optional: a failed optional rule does not fail the step.
+     * The single-request Extract tab keeps the compact four-column layout.
+     */
+    private val showRequired: Boolean = false
 ) : JBPanel<ExtractorTablePanel>(BorderLayout()) {
 
     private var target: MutableList<ResponseExtractor>? = null
     private var results: Map<String, ExtractionResult> = emptyMap()
     private val model = Model()
+
+    private val requiredViewColumn: Int get() = if (showRequired) 1 else -1
+    private val variableViewColumn: Int get() = if (showRequired) 2 else 1
+    private val sourceViewColumn: Int get() = if (showRequired) 3 else 2
+    private val resultViewColumn: Int get() = if (showRequired) 4 else 3
 
     private val addButton = flatButton("+", "Add extractor")
     private val removeButton = flatButton("−", "Remove selected extractor")
@@ -71,12 +81,17 @@ class ExtractorTablePanel(
         override fun computeWidths(tableWidth: Int): List<Int> {
             if (tableWidth <= 0) return emptyList()
             val checkWidth = JBUI.scale(CHECK_WIDTH)
+            val requiredWidth = if (showRequired) JBUI.scale(REQUIRED_WIDTH) else 0
             val rest = proportionalWidths(
-                tableWidth - checkWidth,
+                tableWidth - checkWidth - requiredWidth,
                 listOf(1.7, 2.7, 1.3),
                 listOf(JBUI.scale(130), JBUI.scale(170), JBUI.scale(96))
             )
-            return listOf(checkWidth) + rest.toList()
+            return if (showRequired) {
+                listOf(checkWidth, requiredWidth) + rest.toList()
+            } else {
+                listOf(checkWidth) + rest.toList()
+            }
         }
     }
 
@@ -107,13 +122,27 @@ class ExtractorTablePanel(
                 maxWidth = JBUI.scale(CHECK_WIDTH)
                 resizable = false
             }
+            if (showRequired) {
+                columnModel.getColumn(requiredViewColumn).apply {
+                    preferredWidth = JBUI.scale(REQUIRED_WIDTH)
+                    minWidth = JBUI.scale(REQUIRED_WIDTH)
+                    maxWidth = JBUI.scale(REQUIRED_WIDTH)
+                    resizable = false
+                }
+            }
             setDefaultRenderer(java.lang.Boolean::class.javaObjectType, CheckRenderer())
             setDefaultRenderer(String::class.java, TextRenderer())
-            columnModel.getColumn(RESULT_COLUMN).cellRenderer = ResultRenderer()
-            columnModel.getColumn(VARIABLE_COLUMN).cellEditor = VariableCellEditor()
+            columnModel.getColumn(resultViewColumn).cellRenderer = ResultRenderer()
+            columnModel.getColumn(variableViewColumn).cellEditor = VariableCellEditor()
             selectionModel.addListSelectionListener { if (!it.valueIsAdjusting) updateButtons() }
             installSingleClickEditing(
-                onClick = { row, viewColumn -> viewColumn == CHECK_COLUMN && toggleEnabled(row) },
+                onClick = { row, viewColumn ->
+                    when {
+                        viewColumn == CHECK_COLUMN -> toggleEnabled(row)
+                        showRequired && viewColumn == requiredViewColumn -> toggleRequired(row)
+                        else -> false
+                    }
+                },
                 beginEdit = { row, viewColumn -> beginEdit(row, viewColumn) }
             )
         }
@@ -161,7 +190,7 @@ class ExtractorTablePanel(
         if (row >= 0) {
             table.setRowSelectionInterval(row, row)
             table.scrollRowIntoView(row)
-            beginEdit(row, SOURCE_COLUMN)
+            beginEdit(row, sourceViewColumn)
         }
         updateButtons()
         onChanged()
@@ -184,15 +213,16 @@ class ExtractorTablePanel(
     internal fun tableView(): JBTable = table
 
     internal fun setRowSource(row: Int, source: String) {
-        model.setValueAt(source, row, SOURCE_COLUMN)
+        model.setValueAt(source, row, sourceViewColumn)
     }
 
     internal fun setRowVariable(row: Int, variable: String) {
-        model.setValueAt(variable, row, VARIABLE_COLUMN)
+        model.setValueAt(variable, row, variableViewColumn)
     }
 
     internal fun beginEdit(row: Int, viewColumn: Int): Boolean {
-        if (viewColumn == CHECK_COLUMN || viewColumn == RESULT_COLUMN) return false
+        if (viewColumn == CHECK_COLUMN || viewColumn == resultViewColumn) return false
+        if (showRequired && viewColumn == requiredViewColumn) return false
         if (!table.isEnabled) return false
         val modelColumn = table.convertColumnIndexToModel(viewColumn)
         if (!model.isCellEditable(row, modelColumn)) return false
@@ -208,6 +238,17 @@ class ExtractorTablePanel(
         return true
     }
 
+    internal fun toggleRequired(row: Int): Boolean {
+        if (!showRequired) return false
+        val extractor = model.rowAt(row) ?: return false
+        model.setValueAt(!extractor.required, row, requiredViewColumn)
+        return true
+    }
+
+    internal fun requiredColumnForTest(): Int = requiredViewColumn
+
+    internal fun requiredForTest(row: Int): Boolean? = model.rowAt(row)?.required
+
     internal fun editingCell(): Pair<Int, Int>? =
         if (table.isEditing) table.editingRow to table.editingColumn else null
 
@@ -217,7 +258,7 @@ class ExtractorTablePanel(
 
     /** Applies [name] to [row] the way choosing it from the variable list does. */
     internal fun chooseVariable(row: Int, name: String) {
-        if (!beginEdit(row, VARIABLE_COLUMN)) return
+        if (!beginEdit(row, variableViewColumn)) return
         (table.cellEditor as? VariableCellEditor)?.choose(name)
     }
 
@@ -236,37 +277,43 @@ class ExtractorTablePanel(
 
         override fun getRowCount(): Int = target?.size ?: 0
 
-        override fun getColumnCount(): Int = 4
+        override fun getColumnCount(): Int = if (showRequired) 5 else 4
 
-        override fun getColumnName(column: Int): String = when (column) {
-            CHECK_COLUMN -> ""
-            VARIABLE_COLUMN -> "Variable"
-            SOURCE_COLUMN -> "Source"
+        override fun getColumnName(column: Int): String = when {
+            column == CHECK_COLUMN -> ""
+            showRequired && column == requiredViewColumn -> "Required"
+            column == variableViewColumn -> "Variable"
+            column == sourceViewColumn -> "Source"
             else -> "Last run"
         }
 
-        override fun getColumnClass(column: Int): Class<*> =
-            if (column == CHECK_COLUMN) java.lang.Boolean::class.javaObjectType else String::class.java
+        override fun getColumnClass(column: Int): Class<*> = when {
+            column == CHECK_COLUMN -> java.lang.Boolean::class.javaObjectType
+            showRequired && column == requiredViewColumn -> java.lang.Boolean::class.javaObjectType
+            else -> String::class.java
+        }
 
         override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean =
-            columnIndex == VARIABLE_COLUMN || columnIndex == SOURCE_COLUMN
+            columnIndex == variableViewColumn || columnIndex == sourceViewColumn
 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val extractor = rowAt(rowIndex) ?: return ""
             return when (columnIndex) {
                 CHECK_COLUMN -> extractor.enabled
-                VARIABLE_COLUMN -> extractor.variable
-                SOURCE_COLUMN -> extractor.source
+                variableViewColumn -> extractor.variable
+                sourceViewColumn -> extractor.source
                 else -> ""
             }
         }
 
         override fun setValueAt(value: Any?, rowIndex: Int, columnIndex: Int) {
             val extractor = rowAt(rowIndex) ?: return
-            when (columnIndex) {
-                CHECK_COLUMN -> extractor.enabled = value == true
-                VARIABLE_COLUMN -> extractor.variable = normalizeVariableInput(value?.toString().orEmpty())
-                SOURCE_COLUMN -> {
+            when {
+                columnIndex == CHECK_COLUMN -> extractor.enabled = value == true
+                showRequired && columnIndex == requiredViewColumn -> extractor.required = value == true
+                columnIndex == variableViewColumn ->
+                    extractor.variable = normalizeVariableInput(value?.toString().orEmpty())
+                columnIndex == sourceViewColumn -> {
                     extractor.source = value?.toString()?.trim().orEmpty()
                     // While the name is still empty, follow the path so a path alone is enough.
                     if (extractor.variable.isBlank()) {
@@ -501,6 +548,7 @@ class ExtractorTablePanel(
                 return this
             }
             text = when {
+                !result.successful && !extractor.required -> "Optional failed"
                 !result.successful -> result.error ?: "Failed"
                 result.added -> "Added"
                 result.reEnabled -> "Updated + enabled"
@@ -509,6 +557,7 @@ class ExtractorTablePanel(
             foreground = when {
                 selected -> table.selectionForeground
                 result.successful -> SUCCESS_COLOR
+                !extractor.required -> OPTIONAL_COLOR
                 else -> ERROR_COLOR
             }
             toolTipText = if (result.successful) {
@@ -539,6 +588,7 @@ class ExtractorTablePanel(
         const val RESULT_COLUMN = 3
 
         private const val CHECK_WIDTH = 34
+        private const val REQUIRED_WIDTH = 70
 
         private const val HINT =
             "Sources: data.token · data.items[0].id · headers.X-Request-Id · status"
@@ -548,6 +598,7 @@ class ExtractorTablePanel(
 
         private val SUCCESS_COLOR = JBColor(0x1A7F37, 0x73BD79)
         private val ERROR_COLOR = JBColor(0xC7222D, 0xFF6B68)
+        private val OPTIONAL_COLOR = JBColor(0xA15C00, 0xD6A26A)
 
         /**
          * Accepts the `{{name}}` form as well as a bare name: typing the braces is a natural

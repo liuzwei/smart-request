@@ -1,8 +1,13 @@
 package dev.smartrequest.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.components.JBLabel
@@ -14,6 +19,9 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.scenario.ScenarioGraph
+import dev.smartrequest.scenario.ScenarioImporter
+import dev.smartrequest.scenario.ScenarioJson
+import dev.smartrequest.scenario.ScenarioJsonException
 import dev.smartrequest.service.SmartRequestProjectService
 import java.awt.BorderLayout
 import java.awt.Component
@@ -75,6 +83,8 @@ class ScenarioListPanel(
     private val renameButton = JButton("Rename", null)
     private val duplicateButton = JButton("Duplicate", AllIcons.Actions.Copy)
     private val deleteButton = JButton("Delete", AllIcons.General.Remove)
+    private val exportButton = JButton("Export…", null)
+    private val importButton = JButton("Import…", null)
 
     private var rebuilding = false
     private val stateListener: () -> Unit = { rebuild() }
@@ -85,6 +95,8 @@ class ScenarioListPanel(
         renameButton.addActionListener { renameSelected() }
         duplicateButton.addActionListener { duplicateSelected() }
         deleteButton.addActionListener { deleteSelected() }
+        exportButton.addActionListener { exportSelected() }
+        importButton.addActionListener { importFile() }
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = rebuild()
             override fun removeUpdate(e: DocumentEvent) = rebuild()
@@ -114,7 +126,17 @@ class ScenarioListPanel(
             add(duplicateButton)
             add(deleteButton)
         }
-        header.add(buttons, BorderLayout.SOUTH)
+        val fileButtons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            add(importButton)
+            add(exportButton)
+        }
+        val actions = JBPanel<JBPanel<*>>(BorderLayout(0, 2)).apply {
+            isOpaque = false
+            add(buttons, BorderLayout.NORTH)
+            add(fileButtons, BorderLayout.SOUTH)
+        }
+        header.add(actions, BorderLayout.SOUTH)
         return header
     }
 
@@ -160,6 +182,7 @@ class ScenarioListPanel(
         renameButton.isEnabled = selected
         duplicateButton.isEnabled = selected
         deleteButton.isEnabled = selected
+        exportButton.isEnabled = selected
     }
 
     private fun selectedScenario(): ScenarioConfig? = list.selectedValue
@@ -208,11 +231,94 @@ class ScenarioListPanel(
         rebuild()
     }
 
+    private fun exportSelected() {
+        val scenario = selectedScenario() ?: return
+        val text = try {
+            encodeScenario(scenario)
+        } catch (e: Exception) {
+            notify("Could not prepare the scenario: ${e.message ?: e.javaClass.simpleName}", NotificationType.ERROR)
+            return
+        }
+        val descriptor = FileSaverDescriptor(
+            "Export Scenario",
+            "Save the scenario and the requests it uses as a JSON file",
+            "json"
+        )
+        val wrapper = FileChooserFactory.getInstance()
+            .createSaveFileDialog(descriptor, project)
+            .save(null as com.intellij.openapi.vfs.VirtualFile?, "${safeFileName(scenario.name)}.json") ?: return
+        try {
+            wrapper.file.writeText(text)
+            notify("Exported '${scenario.name}'.", NotificationType.INFORMATION)
+        } catch (e: Exception) {
+            notify("Could not write the file: ${e.message ?: e.javaClass.simpleName}", NotificationType.ERROR)
+        }
+    }
+
+    private fun importFile() {
+        val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("json")
+            .withTitle("Import Scenario")
+        val file = FileChooserFactory.getInstance()
+            .createFileChooser(descriptor, project, null)
+            .choose(project)
+            .firstOrNull() ?: return
+        try {
+            val text = String(file.contentsToByteArray(), Charsets.UTF_8)
+            val scenario = importScenario(text)
+            list.setSelectedValue(scenario, true)
+            open(scenario)
+            notify("Imported scenario '${scenario.name}'.", NotificationType.INFORMATION)
+        } catch (e: ScenarioJsonException) {
+            notify(e.message ?: "The file is not a valid scenario.", NotificationType.WARNING)
+        } catch (e: Exception) {
+            notify("Could not import the file: ${e.message ?: e.javaClass.simpleName}", NotificationType.ERROR)
+        }
+    }
+
+    private fun encodeScenario(scenario: ScenarioConfig): String = ScenarioJson.encode(
+        scenario = scenario,
+        requestProvider = service::findRequest,
+        groupProvider = { id -> service.groupOf(id)?.name }
+    )
+
+    private fun importScenario(text: String): ScenarioConfig {
+        val bundle = ScenarioJson.decode(text)
+        val scenario = ScenarioImporter.apply(service, bundle)
+        rebuild()
+        return scenario
+    }
+
+    private fun safeFileName(name: String): String {
+        val cleaned = name.trim()
+            .map { character ->
+                if (character.isLetterOrDigit() || character == ' ' || character == '-' || character == '_') {
+                    character
+                } else {
+                    '_'
+                }
+            }
+            .joinToString("")
+            .trim()
+        return cleaned.ifEmpty { "scenario" }
+    }
+
+    private fun notify(message: String, type: NotificationType) {
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup("Smart Request")
+            .createNotification("Scenarios", message, type)
+            .notify(project)
+    }
+
     private fun open(scenario: ScenarioConfig) {
         ScenarioEditorService.getInstance(project).open(scenario.id)
     }
 
     // Test hooks.
+
+    internal fun exportForTest(scenarioId: String): String? =
+        service.scenario(scenarioId)?.let { encodeScenario(it) }
+
+    internal fun importForTest(text: String): ScenarioConfig = importScenario(text)
 
     internal fun scenarioCount(): Int = model.size()
 

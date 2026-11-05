@@ -3,6 +3,8 @@ package dev.smartrequest.ui
 import com.intellij.openapi.components.service
 import com.intellij.testFramework.EdtTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import dev.smartrequest.model.HttpRequestConfig
+import dev.smartrequest.scenario.ScenarioGraph
 import dev.smartrequest.service.SmartRequestProjectService
 
 class ScenarioListPanelUiTest : BasePlatformTestCase() {
@@ -53,6 +55,45 @@ class ScenarioListPanelUiTest : BasePlatformTestCase() {
             assertTrue(panel.select(scenario.id))
         }
         assertTrue(panel.isDeleteEnabled())
+
+        onEdt { panel.dispose() }
+    }
+
+    fun testScenarioCanBeExportedAndImportedAsJson() {
+        onEdt {
+            service().state().scenarios.clear()
+            service().notifyChanged()
+        }
+        val panel = onEdtGet { ScenarioListPanel(project) }
+        val scenario = onEdtGet { service().addScenario("Shared") }
+        val request = onEdtGet {
+            HttpRequestConfig(name = "Login", method = "POST", url = "{{baseUrl}}/login").also {
+                service().state().groups.first().requests.add(it)
+            }
+        }
+        onEdt {
+            val node = ScenarioGraph.addRequestNode(scenario, request.id, afterNodeId = null)
+            node.expectStatus = "2xx"
+            node.retries = 1
+            service().notifyChanged()
+        }
+
+        val json = onEdtGet { panel.exportForTest(scenario.id) }
+        assertNotNull(json)
+        assertTrue(json!!.contains("\"format\": \"smart-request-scenario\""))
+        assertTrue(json.contains(request.name))
+        assertTrue(json.contains("\"expectStatus\": \"2xx\""))
+
+        onEdt { service().removeScenario(scenario.id) }
+        val imported = onEdtGet { panel.importForTest(json) }
+
+        assertEquals("Shared", imported.name)
+        val node = ScenarioGraph.requestNodes(imported).single()
+        assertNotNull(node.requestId)
+        assertFalse(node.requestId == request.id)
+        assertEquals("2xx", node.expectStatus)
+        assertEquals(1, node.retries)
+        assertTrue(panel.names().contains("Shared"))
 
         onEdt { panel.dispose() }
     }

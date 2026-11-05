@@ -122,6 +122,9 @@
 - 画布直接显示运行状态（pending / running / passed / failed / skipped）和 HTTP 状态码；点击画布节点会同步步骤表和检查器，点击运行面板的结果行也会选中画布节点。
 - 节点位置保存在项目文件里，重启 IDEA 后保持。
 - 每个步骤可以单独设置 `Expect status`（空 = 200–399，支持 `2xx`、`404`、`200-299`、`200,201`）、超时（空 = 项目默认）和出参规则（JSONPath，与 Extract 相同）；`Sync from request` 可复制请求自带的 Extract 规则。
+- 运行结束后可以在 `Response` Tab 查看当前选中步骤的响应（状态、Header、Body），数据来自本次运行保留的响应，不会重新发请求；运行面板和步骤表仍然保留。
+- 出参可以逐条取消 `Required`：可选出参失败不会让步骤失败，失败值也不会传给下游；每个步骤可以设置 `Retries`（0–5），发送失败、状态不符或必选出参失败时会自动重试，最终错误会标明尝试次数。
+- 请求树里的请求可以直接拖到画布上，松开即在该位置创建步骤；`Scenarios` 工具窗支持把场景及其引用的请求导出为一个自包含的 JSON 文件，也可以从 JSON 导入为新的场景和请求（请求 ID 会重新映射，不会和现有请求冲突）。
 - 场景级参数（默认值）在 `Parameters` Tab 中维护，运行对话框里可以按次覆盖；参数同样参与变量数据流校验。
 - 运行前做静态校验：环、不可达/到不了 End、请求已删除、变量数据流（某个 `{{token}}` 没有任何上游节点产出）、并行写同名变量。顶部显示 `✓ Valid` / `N error(s)`，点击可看全部问题并跳到对应步骤。
 - `Run`：有参数或缺失变量时打开运行对话框（选择环境、填写参数/缺失变量）；运行中逐步显示状态、HTTP 状态、耗时和抓到的值；失败即停，未开始的步骤标记为 skipped。
@@ -389,7 +392,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（278 个）：
+当前测试覆盖（299 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -422,6 +425,12 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 场景历史：撤销/重做恢复节点、位置、出参与依赖，最多 50 步，新编辑清空 redo，被拒绝的修改可回滚
 - 场景视图切换：`Steps | Graph` 保留选中节点、画布选中同步步骤表/检查器、运行面板结果行选中画布节点
 - 场景端到端：假 transport 的 UI 运行、共享 `HttpClient` 连续发请求、真实本地 HTTP Server 的登录拿 token → 下游请求使用 token
+- 场景出参与重试：可选出参失败不失败步骤、必选出参失败仍失败、失败后按 `Retries` 重试成功、重试耗尽时错误包含尝试次数
+- 场景 JSON：自包含导出（请求、分组、出参、`required`、`retries`、坐标）、确定性输出、引号/换行/Unicode 转义、非法 JSON/格式/版本错误、默认值、缺失请求
+- 场景导入：请求 ID 与节点 ID 重新映射、分组创建/复用、同文件重复导入产生独立副本、未知请求键、空分组名
+- 场景响应查看器：运行结束后选中步骤显示对应响应、切换步骤更新内容
+- 请求拖拽：拖拽载荷编码/解码、拖到画布生成指定位置的步骤并进入撤销栈
+- 场景导出/导入 UI：工具窗导出 JSON、删除后导入、新场景/新请求、`expectStatus`/`retries` 保留
 - 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
 - 请求右键菜单 `Move to Group` 的子菜单内容与回调
 - 变量高亮、Path 参数自动同步
@@ -516,7 +525,10 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 5. 点 `Run`。如果 `token` 没有上游产出，运行对话框会提示缺失变量；如果它由登录步骤产出，直接运行。
 6. 运行面板逐行显示 passed/failed/skipped、HTTP 状态、耗时和抓到的值；失败时后面的步骤不会执行。
 7. 删除被引用的请求后，顶部会显示错误并阻止运行，避免跑到一半才发现。
-8. 切到 `Graph` 可以拖动节点整理布局；拖右侧端口到另一个节点的左端口会建立依赖，非法连线（成环、重复、连到 Start/End）会在拖动时直接标红并给出原因。`Ctrl+Z` 撤销画布上的拖动、连线、删除和自动布局。
+8. 切到 `Graph` 可以拖动节点整理布局；拖右侧端口到另一个节点的左端口会建立依赖，非法连线（成环、重复、连到 Start/End）会在拖动时直接标红并给出原因。`Ctrl+Z` 撤销画布上的拖动、连线、删除和自动布局。也可以直接把左侧请求树里的请求拖到画布上，松开的位置就是新步骤的位置。
+9. 运行结束后切到 `Response` Tab 查看当前步骤的响应；在步骤表或画布上换一个步骤，响应会跟着换。
+10. 需要容错时：在出参表里取消 `Required`，失败的可选出参不会让步骤失败；在检查器里设置 `Retries`（0–5），发送失败或状态不符会自动重试。
+11. `Scenarios` 工具窗的 `Export…` 会把场景和它用到的请求一起导出为自包含 JSON；`Import…` 在另一个项目里导入时，会创建新的请求和场景（请求 ID 重新映射）。
 
 ### 移动请求到其他分组
 
@@ -576,6 +588,8 @@ src/main/kotlin/dev/smartrequest/
 │   ├── ScenarioGraph.kt     # 依赖编辑、Start/End 自动连线、执行顺序、连线校验
 │   ├── ScenarioLayout.kt    # 分层 + barycenter 自动布局
 │   ├── ScenarioHistory.kt   # 节点/边快照的撤销/重做
+│   ├── ScenarioJson.kt      # 自包含 JSON 导出/导入（无第三方 JSON 库）
+│   ├── ScenarioImporter.kt  # 导入时创建请求、重新映射节点/边
 │   ├── ScenarioValidator.kt # 结构 + 变量数据流校验
 │   ├── ScenarioRunner.kt    # 失败即停的 DAG 调度与运行作用域
 │   └── StatusExpectation.kt # expectStatus 表达式
@@ -605,6 +619,7 @@ src/main/kotlin/dev/smartrequest/
 │   ├── ScenarioGraphCanvas.kt# 活动网络图画布（拖拽、端口连线、缩放、运行状态）
 │   ├── ScenarioInspectorPanel.kt# 请求/依赖/expectStatus/超时/出参
 │   ├── ScenarioRunPanel.kt  # 逐步骤结果与最终运行变量
+│   ├── RequestDragData.kt   # 请求树 → 画布的拖拽载荷
 │   ├── ScenarioFileType.kt  # 场景 Tab 的文件类型
 │   ├── ScenarioEditorProvider.kt # FileEditorProvider 与 Tab 复用
 │   └── dialogs/             # 环境设置、请求设置、历史、场景运行、请求选择器
@@ -666,8 +681,10 @@ src/main/kotlin/dev/smartrequest/
 - Spring 扫描只识别直接标注的注解，不识别自定义组合注解；Body 生成基于 DTO 字段和字段注解，不解析完整 Swagger/OpenAPI schema 或方法级 `@Operation` 里的 requestBody 示例。
 - 表格行不支持拖拽排序，也不支持从剪贴板批量粘贴多行 `Key: Value`。
 - URL 同步只覆盖 Query 部分；修改 URL 里的 Path `{占位符}` 会增删 Path Params 行，但反过来在表格里改不了 Path 名。
-- 场景画布不支持框选、正交连线、缩略图、节点分组和从请求树拖入；画布上的撤销/重做只覆盖图形结构（节点、位置、依赖），场景参数和名称不在撤销栈里。
-- 场景不支持循环、条件分支、失败分支、重试、延迟和定时运行；运行结果只在当前 IDE 会话保留。
+- 场景画布不支持框选、正交连线、缩略图、节点分组；画布上的撤销/重做只覆盖图形结构（节点、位置、依赖），场景参数和名称不在撤销栈里。
+- 场景不支持循环、条件分支、失败分支、延迟和定时运行；`Retries` 是立即重试，没有退避/延迟，每次尝试单独计时，因此总耗时可能超过单节点超时。
+- 可选出参失败时不会阻塞运行，但如果下游请求仍然引用这个变量，运行到下游时会以“未解析变量”失败；导出/导入 JSON 总是创建新请求，不会合并或更新项目里已有的同名请求。
+- 运行结果（包括 Response Tab 的响应）只在当前 IDE 会话保留。
 
 ---
 

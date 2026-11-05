@@ -152,7 +152,10 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
             y = 40,
             expectStatus = "2xx",
             timeoutMs = 5_000,
-            outputs = mutableListOf(ResponseExtractor(variable = "token", source = "data.token"))
+            retries = 2,
+            outputs = mutableListOf(
+                ResponseExtractor(variable = "token", source = "data.token", required = false)
+            )
         )
         val end = ScenarioNode(kind = ScenarioNode.KIND_END, name = "End", x = 220)
         val state = SmartRequestState.createDefault().apply {
@@ -187,8 +190,10 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals(220, scenario.nodes.single { it.kind == ScenarioNode.KIND_END }.x)
         assertEquals("2xx", restoredLogin.expectStatus)
         assertEquals(5_000, restoredLogin.timeoutMs)
+        assertEquals(2, restoredLogin.retries)
         assertEquals("token", restoredLogin.outputs.single().variable)
         assertEquals("data.token", restoredLogin.outputs.single().source)
+        assertEquals(false, restoredLogin.outputs.single().required)
         assertEquals(2, scenario.edges.size)
         assertTrue(scenario.edges.any { it.from == start.id && it.to == login.id })
     }

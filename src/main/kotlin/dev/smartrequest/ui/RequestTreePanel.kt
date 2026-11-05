@@ -15,6 +15,8 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.Transferable
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -29,6 +31,7 @@ import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
+import javax.swing.TransferHandler
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
@@ -109,7 +112,21 @@ class RequestTreePanel(
             }
         })
         installDeleteShortcut()
+        installDragSupport()
         rebuild()
+    }
+
+    /** Lets the user drag a request onto the scenario canvas to add a step at the drop point. */
+    private fun installDragSupport() {
+        tree.dragEnabled = true
+        tree.transferHandler = object : TransferHandler() {
+            override fun getSourceActions(component: JComponent?): Int = TransferHandler.COPY
+
+            override fun createTransferable(component: JComponent?): Transferable? {
+                val request = selectedRequest() ?: return null
+                return StringSelection(RequestDragData.encode(request.id))
+            }
+        }
     }
 
     private fun buildHeader(): JComponent {

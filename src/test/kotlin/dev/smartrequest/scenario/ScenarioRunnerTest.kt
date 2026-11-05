@@ -54,7 +54,8 @@ class ScenarioRunnerTest {
         requestId: String,
         y: Int = 0,
         expectStatus: String = "",
-        outputs: List<ResponseExtractor> = emptyList()
+        outputs: List<ResponseExtractor> = emptyList(),
+        retries: Int = 0
     ): ScenarioNode = ScenarioNode(
         id = id,
         kind = ScenarioNode.KIND_REQUEST,
@@ -62,7 +63,8 @@ class ScenarioRunnerTest {
         x = 200,
         y = y,
         expectStatus = expectStatus,
-        outputs = outputs.toMutableList()
+        outputs = outputs.toMutableList(),
+        retries = retries
     )
 
     private fun edge(from: ScenarioNode, to: ScenarioNode) = ScenarioEdge(from = from.id, to = to.id)
@@ -446,6 +448,109 @@ class ScenarioRunnerTest {
         assertEquals(5_000, prepared.last().timeoutMs)
         respond("http://test/a")
         assertEquals(ScenarioRunState.PASSED, awaitResult(handle).state)
+    }
+
+    @Test
+    fun `a node retries until it passes`() {
+        request("flaky", "http://test/flaky")
+        val start = startNode()
+        val node = requestNode("flaky-node", "flaky", retries = 2)
+        val end = endNode()
+
+        val handle = run(
+            scenario(start, node, end, edges = listOf(edge(start, node), edge(node, end)))
+        )
+
+        assertEquals("http://test/flaky", awaitStarted())
+        respond("http://test/flaky", status = 500)
+        assertEquals("http://test/flaky", awaitStarted())
+        respond("http://test/flaky", status = 503)
+        assertEquals("http://test/flaky", awaitStarted())
+        respond("http://test/flaky", status = 200)
+
+        val result = awaitResult(handle)
+
+        assertEquals(ScenarioRunState.PASSED, result.state)
+        assertEquals(NodeRunState.PASSED, result.nodes.getValue(node.id).state)
+        assertEquals(200, result.nodes.getValue(node.id).statusCode)
+        assertEquals(3, prepared.count { it.url == "http://test/flaky" })
+    }
+
+    @Test
+    fun `retries are exhausted with the attempt count in the error`() {
+        request("flaky", "http://test/flaky")
+        val start = startNode()
+        val node = requestNode("flaky-node", "flaky", retries = 1)
+        val end = endNode()
+
+        val handle = run(
+            scenario(start, node, end, edges = listOf(edge(start, node), edge(node, end)))
+        )
+
+        assertEquals("http://test/flaky", awaitStarted())
+        respond("http://test/flaky", status = 500)
+        assertEquals("http://test/flaky", awaitStarted())
+        respond("http://test/flaky", status = 500)
+
+        val result = awaitResult(handle)
+
+        assertEquals(ScenarioRunState.FAILED, result.state)
+        val error = result.nodes.getValue(node.id).error.orEmpty()
+        assertTrue(error.contains("after 2 attempts"), error)
+        assertEquals(2, prepared.count { it.url == "http://test/flaky" })
+    }
+
+    @Test
+    fun `an optional capture failure does not fail the node`() {
+        request("login", "http://test/login")
+        val start = startNode()
+        val node = requestNode(
+            "login-node",
+            "login",
+            outputs = listOf(ResponseExtractor(variable = "token", source = "data.token", required = false))
+        )
+        val end = endNode()
+
+        val handle = run(
+            scenario(start, node, end, edges = listOf(edge(start, node), edge(node, end)))
+        )
+
+        assertEquals("http://test/login", awaitStarted())
+        respond("http://test/login", body = """{"ok":true}""")
+
+        val result = awaitResult(handle)
+
+        assertEquals(ScenarioRunState.PASSED, result.state)
+        val nodeResult = result.nodes.getValue(node.id)
+        assertEquals(NodeRunState.PASSED, nodeResult.state)
+        assertFalse(nodeResult.outputs.single().successful)
+        assertFalse(result.variables.any { it.name == "token" })
+        assertEquals(1, prepared.size)
+    }
+
+    @Test
+    fun `a required capture failure still fails the node`() {
+        request("login", "http://test/login")
+        val start = startNode()
+        val node = requestNode(
+            "login-node",
+            "login",
+            outputs = listOf(ResponseExtractor(variable = "token", source = "data.token"))
+        )
+        val end = endNode()
+
+        val handle = run(
+            scenario(start, node, end, edges = listOf(edge(start, node), edge(node, end)))
+        )
+
+        assertEquals("http://test/login", awaitStarted())
+        respond("http://test/login", body = """{"ok":true}""")
+
+        val result = awaitResult(handle)
+
+        assertEquals(ScenarioRunState.FAILED, result.state)
+        assertEquals(NodeRunState.FAILED, result.nodes.getValue(node.id).state)
+        assertTrue(result.nodes.getValue(node.id).error.orEmpty().contains("Capture failed"))
     }
 
     @Test

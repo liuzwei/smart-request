@@ -114,6 +114,13 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         assertEquals("nonsense", nodes.first().expectStatus)
         assertTrue(panel.validationTextForTest(), panel.validationTextForTest().contains("error"))
 
+        onEdt { inspector.setRetriesText("2") }
+        assertEquals(2, nodes.first().retries)
+        assertTrue(inspector.retriesHintText(), inspector.retriesHintText().contains("2"))
+        onEdt { inspector.setRetriesText("99") }
+        assertEquals(2, nodes.first().retries)
+        assertTrue(inspector.retriesHintText(), inspector.retriesHintText().contains("Use"))
+
         onEdt { panel.dispose() }
     }
 
@@ -133,6 +140,12 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         assertEquals(1, node.outputs.size)
         assertEquals("token", node.outputs.first().variable)
         assertEquals(1, panel.inspectorForTest().outputsPanel().targetSizeForTest())
+        val outputs = panel.inspectorForTest().outputsPanel()
+        onEdt {
+            assertTrue(outputs.requiredForTest(0) == true)
+            outputs.toggleRequired(0)
+        }
+        assertFalse(node.outputs.first().required)
 
         onEdt { panel.dispose() }
     }
@@ -188,6 +201,13 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         assertTrue(panel.runPanelForTest().summaryText().contains("2 passed"))
         assertTrue(panel.runPanelForTest().variablesText().contains("token=abc123"))
 
+        onEdt { panel.selectNodeForTest(nodes[0].id) }
+        assertEquals(200, panel.responsePanelForTest().responseForTest()?.statusCode)
+        assertTrue(panel.responsePanelForTest().responseForTest()?.body?.contains("abc123") == true)
+        onEdt { panel.selectNodeForTest(nodes[1].id) }
+        assertEquals(200, panel.responsePanelForTest().responseForTest()?.statusCode)
+        assertEquals("""{"ok":true}""", panel.responsePanelForTest().responseForTest()?.body)
+
         onEdt { panel.dispose() }
     }
 
@@ -208,6 +228,28 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         assertEquals("scenarioParamXyz", scenario.parameters.first().key)
         assertEquals("acme", scenario.parameters.first().value)
         assertTrue(panel.validationTextForTest(), panel.validationTextForTest().startsWith("✓"))
+
+        onEdt { panel.dispose() }
+    }
+
+    fun testARequestDroppedOnTheCanvasBecomesAStep() {
+        val scenario = onEdtGet { service().addScenario("Flow") }
+        val request = onEdtGet { addRequest("Dropped", "POST", url = "{{baseUrl}}/dropped") }
+        val panel = onEdtGet { ScenarioEditorPanel(project, scenario.id) }
+        onEdt { panel.showGraphForTest() }
+
+        onEdt { panel.graphCanvasForTest().dropRequestForTest(request.id, 120, 80) }
+
+        val node = panel.scenarioForTest()!!.nodes.single { it.isRequestNode() }
+        assertEquals(request.id, node.requestId)
+        assertEquals(120, node.x)
+        assertEquals(80, node.y)
+        assertEquals(1, panel.stepsTableForTest().rowCount())
+        assertEquals(node.id, panel.stepsTableForTest().selectedNodeId())
+        assertTrue(panel.canUndoForTest())
+
+        onEdt { panel.undoForTest() }
+        assertEquals(0, panel.scenarioForTest()!!.nodes.count { it.isRequestNode() })
 
         onEdt { panel.dispose() }
     }

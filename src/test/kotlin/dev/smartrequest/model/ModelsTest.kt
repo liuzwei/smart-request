@@ -1,6 +1,7 @@
 package dev.smartrequest.model
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -154,5 +155,29 @@ class ModelsTest {
         assertNotSame(scenario.nodes.first().outputs.first(), copy.nodes.first().outputs.first())
         assertNotSame(scenario.edges.first(), copy.edges.first())
         assertEquals(scenario.nodes.first().id, copy.nodes.first().id)
+    }
+
+    @Test
+    fun `retries are clamped and optional captures survive a deep copy`() {
+        val node = ScenarioNode(
+            kind = ScenarioNode.KIND_REQUEST,
+            requestId = "request-1",
+            retries = 99,
+            outputs = mutableListOf(
+                ResponseExtractor(variable = "token", source = "data.token", required = false)
+            )
+        )
+
+        node.normalize()
+
+        assertEquals(ScenarioNode.MAX_RETRIES, node.retries)
+        assertFalse(node.outputs.first().required)
+        val copy = node.deepCopy()
+        assertEquals(ScenarioNode.MAX_RETRIES, copy.retries)
+        assertFalse(copy.outputs.first().required)
+        assertNotSame(node.outputs.first(), copy.outputs.first())
+
+        val terminal = ScenarioNode(kind = ScenarioNode.KIND_START, retries = 3).apply { normalize() }
+        assertEquals(0, terminal.retries)
     }
 }

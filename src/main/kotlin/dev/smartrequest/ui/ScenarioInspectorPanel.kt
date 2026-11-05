@@ -25,6 +25,8 @@ import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
@@ -63,11 +65,19 @@ class ScenarioInspectorPanel(
     }
     private val expectField = JBTextField().apply { columns = 10 }
     private val timeoutField = JBTextField().apply { columns = 7 }
+    private val retriesField = JBTextField().apply {
+        columns = 4
+        toolTipText = "Extra attempts after a failed send, status or required capture; 0 = no retry"
+    }
     private val expectHint = JBLabel(EXPECT_HINT).apply {
         foreground = UIUtil.getContextHelpForeground()
         font = font.deriveFont(font.size2D - 1f)
     }
     private val timeoutHint = JBLabel(TIMEOUT_HINT).apply {
+        foreground = UIUtil.getContextHelpForeground()
+        font = font.deriveFont(font.size2D - 1f)
+    }
+    private val retriesHint = JBLabel(RETRIES_HINT).apply {
         foreground = UIUtil.getContextHelpForeground()
         font = font.deriveFont(font.size2D - 1f)
     }
@@ -83,7 +93,8 @@ class ScenarioInspectorPanel(
         variableNamesProvider = { node?.let { variableNamesProvider(it.id) }.orEmpty() },
         showRunButton = false,
         hintText = OUTPUTS_HINT,
-        hintToolTip = "Captured values live in the run scope only; a scenario run never writes the environment."
+        hintToolTip = "Captured values live in the run scope only; a scenario run never writes the environment.",
+        showRequired = true
     )
     private val messageLabel = JBLabel().apply {
         foreground = UIUtil.getContextHelpForeground()
@@ -105,6 +116,10 @@ class ScenarioInspectorPanel(
         }
         expectField.document.addDocumentListener(simpleListener { onExpectStatusEdited() })
         timeoutField.document.addDocumentListener(simpleListener { onTimeoutEdited() })
+        retriesField.addActionListener { onRetriesEdited() }
+        retriesField.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(event: FocusEvent) = onRetriesEdited()
+        })
     }
 
     fun bind(scenario: ScenarioConfig?, nodeId: String?) {
@@ -127,6 +142,8 @@ class ScenarioInspectorPanel(
             updateExpectHint(selected.expectStatus)
             timeoutField.text = selected.timeoutMs?.toString().orEmpty()
             updateTimeoutHint(selected.timeoutMs)
+            retriesField.text = selected.retries.takeIf { it > 0 }?.toString().orEmpty()
+            updateRetriesHint(selected.retries)
             rebuildDependencies(selected)
             outputsPanel.bind(selected.outputs)
         } finally {
@@ -217,6 +234,32 @@ class ScenarioInspectorPanel(
     private fun updateTimeoutHint(value: Int?) {
         timeoutHint.text = if (value == null) TIMEOUT_HINT else "${value} ms for this step"
         timeoutHint.foreground = UIUtil.getContextHelpForeground()
+    }
+
+    private fun onRetriesEdited() {
+        if (binding) return
+        val current = node ?: return
+        val text = retriesField.text.trim()
+        if (text.isEmpty()) {
+            current.retries = 0
+            updateRetriesHint(0)
+            onChanged()
+            return
+        }
+        val value = text.toIntOrNull()
+        if (value == null || value !in 0..ScenarioNode.MAX_RETRIES) {
+            retriesHint.text = "Use 0–${ScenarioNode.MAX_RETRIES}"
+            retriesHint.foreground = JBColor.RED
+            return
+        }
+        current.retries = value
+        updateRetriesHint(value)
+        onChanged()
+    }
+
+    private fun updateRetriesHint(value: Int) {
+        retriesHint.text = if (value == 0) RETRIES_HINT else "Up to $value retry attempt(s)"
+        retriesHint.foreground = UIUtil.getContextHelpForeground()
     }
 
     private fun rebuildDependencies(node: ScenarioNode) {
@@ -312,14 +355,25 @@ class ScenarioInspectorPanel(
         form.add(JBLabel("Timeout"), gbc)
         gbc.gridx = 5
         gbc.weightx = 0.25
-        gbc.insets = Insets(0, 0, JBUI.scale(4), 0)
+        gbc.insets = Insets(0, 0, JBUI.scale(4), JBUI.scale(8))
         form.add(timeoutField, gbc)
+
+        gbc.gridx = 6
+        gbc.weightx = 0.0
+        gbc.insets = Insets(0, JBUI.scale(4), JBUI.scale(4), JBUI.scale(8))
+        form.add(JBLabel("Retries"), gbc)
+        gbc.gridx = 7
+        gbc.weightx = 0.15
+        gbc.insets = Insets(0, 0, JBUI.scale(4), 0)
+        form.add(retriesField, gbc)
 
         val hints = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
             isOpaque = false
             add(expectHint)
             add(JBLabel("·").apply { foreground = UIUtil.getContextHelpForeground() })
             add(timeoutHint)
+            add(JBLabel("·").apply { foreground = UIUtil.getContextHelpForeground() })
+            add(retriesHint)
         }
         val formWithHints = JBPanel<JBPanel<*>>(BorderLayout(0, 2)).apply {
             isOpaque = false
@@ -422,6 +476,15 @@ class ScenarioInspectorPanel(
 
     internal fun timeoutHintText(): String = timeoutHint.text
 
+    internal fun setRetriesText(text: String) {
+        retriesField.text = text
+        onRetriesEdited()
+    }
+
+    internal fun retriesText(): String = retriesField.text
+
+    internal fun retriesHintText(): String = retriesHint.text
+
     internal fun dependencyIds(): List<String> = dependencyBoxes.map { it.first }
 
     internal fun isDependencyChecked(nodeId: String): Boolean =
@@ -463,7 +526,8 @@ class ScenarioInspectorPanel(
 
         private const val EXPECT_HINT = "Empty = 200–399 · 2xx · 404 · 200-299 · 200,201"
         private const val TIMEOUT_HINT = "Empty = project default"
+        private const val RETRIES_HINT = "0 = no retry"
         private const val OUTPUTS_HINT =
-            "Captures are JSONPath rules (data.token, headers.X-Request-Id); downstream steps use {{name}}."
+            "Uncheck Required to let a failed rule pass the step; failed optional values are not passed downstream."
     }
 }

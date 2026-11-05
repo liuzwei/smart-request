@@ -17,6 +17,7 @@ import dev.smartrequest.model.SmartRequestState
 import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -179,7 +180,7 @@ class ScenarioRunner(
         private val pending = LinkedHashSet<String>()
         private val ready = ArrayList<String>()
         private val running = HashMap<String, CompletableFuture<*>>()
-        private val transportFutures = HashMap<String, CompletableFuture<HttpResponseData>>()
+        private val transportFutures = ConcurrentHashMap<String, CompletableFuture<HttpResponseData>>()
         private val captured = LinkedHashMap<String, CapturedVariable>()
         private val scope = LinkedHashMap<String, String>()
         private val startedAtMs = System.currentTimeMillis()
@@ -319,16 +320,9 @@ class ScenarioRunner(
             )
             emit(ScenarioRunEvent.NodeStarted(runId, node.id))
 
-            val sendFuture = try {
-                transport.send(prepared)
-            } catch (e: Exception) {
-                failNow(node, HttpTransport.describeError(e))
-                return
-            }
-            transportFutures[node.id] = sendFuture
             val startedNanos = System.nanoTime()
             val future = CompletableFuture.supplyAsync(
-                { evaluate(node, prepared, sendFuture, startedNanos) },
+                { evaluateWithRetries(node, prepared, startedNanos) },
                 workers
             )
             running[node.id] = future
@@ -347,25 +341,53 @@ class ScenarioRunner(
             }
         }
 
-        private fun evaluate(
+        /**
+         * Runs one node with its retry budget. Every attempt sends the same prepared request; a
+         * failed transport call, status expectation or required capture triggers another attempt.
+         * The future of the current attempt is published so cancelling the run aborts it.
+         */
+        private fun evaluateWithRetries(
             node: ScenarioNode,
             prepared: PreparedRequest,
-            sendFuture: CompletableFuture<HttpResponseData>,
             startedNanos: Long
         ): ScenarioNodeResult {
-            val response = try {
-                sendFuture.get()
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return cancelledResult(node, prepared, startedNanos, "Run cancelled")
-            } catch (e: CancellationException) {
-                return cancelledResult(node, prepared, startedNanos, "Run cancelled")
-            } catch (e: ExecutionException) {
-                return failedResult(node, prepared, startedNanos, HttpTransport.describeError(e))
-            } catch (e: Exception) {
-                return failedResult(node, prepared, startedNanos, HttpTransport.describeError(e))
+            val attempts = node.retries.coerceIn(0, ScenarioNode.MAX_RETRIES) + 1
+            var last: ScenarioNodeResult? = null
+            for (attempt in 1..attempts) {
+                val sendFuture = try {
+                    transport.send(prepared)
+                } catch (e: Exception) {
+                    last = failedResult(node, prepared, startedNanos, HttpTransport.describeError(e))
+                    continue
+                }
+                transportFutures[node.id] = sendFuture
+                val result = try {
+                    val response = sendFuture.get()
+                    evaluateResponse(node, prepared, response, startedNanos)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return cancelledResult(node, prepared, startedNanos, "Run cancelled")
+                } catch (e: CancellationException) {
+                    return cancelledResult(node, prepared, startedNanos, "Run cancelled")
+                } catch (e: ExecutionException) {
+                    failedResult(node, prepared, startedNanos, HttpTransport.describeError(e))
+                } catch (e: Exception) {
+                    failedResult(node, prepared, startedNanos, HttpTransport.describeError(e))
+                }
+                last = result
+                if (result.state == NodeRunState.PASSED) break
             }
-            return evaluateResponse(node, prepared, response, startedNanos)
+            val finalResult = last ?: failedResult(
+                node,
+                prepared,
+                startedNanos,
+                "The node did not produce a result"
+            )
+            return if (finalResult.state == NodeRunState.FAILED && attempts > 1) {
+                finalResult.copy(error = "${finalResult.error} (after $attempts attempts)")
+            } else {
+                finalResult
+            }
         }
 
         private fun evaluateResponse(
@@ -389,7 +411,10 @@ class ScenarioRunner(
             } catch (e: Exception) {
                 return failedResult(node, prepared, startedNanos, e.message ?: "Capture failed", response)
             }
-            val failures = captures.filter { !it.successful }
+            // Optional captures are recorded in the result (so the UI can explain the failure) but
+            // do not fail the node; only required failures do.
+            val optionalIds = node.outputs.filter { !it.required }.map { it.id }.toSet()
+            val failures = captures.filter { !it.successful && it.extractorId !in optionalIds }
             if (failures.isNotEmpty()) {
                 val message = failures.joinToString("; ") { value ->
                     val name = value.variable.ifBlank { value.source }

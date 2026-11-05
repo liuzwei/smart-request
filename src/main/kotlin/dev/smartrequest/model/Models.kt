@@ -205,13 +205,19 @@ class ResponseExtractor(
     var id: String = UUID.randomUUID().toString(),
     var enabled: Boolean = true,
     var variable: String = "",
-    var source: String = ""
+    var source: String = "",
+    /**
+     * Scenario captures: when false, a failed rule does not fail the scenario node. It is ignored by
+     * single-request Extract, where a failed rule simply writes nothing.
+     */
+    var required: Boolean = true
 ) {
     fun deepCopy(): ResponseExtractor = ResponseExtractor().also { copy ->
         copy.id = id
         copy.enabled = enabled
         copy.variable = variable
         copy.source = source
+        copy.required = required
     }
 
     fun isBlank(): Boolean = variable.isBlank() && source.isBlank()
@@ -302,7 +308,9 @@ class ScenarioNode(
     var y: Int = 0,
     var expectStatus: String = "",
     var timeoutMs: Int? = null,
-    var outputs: MutableList<ResponseExtractor> = mutableListOf()
+    var outputs: MutableList<ResponseExtractor> = mutableListOf(),
+    /** Extra attempts after a failed send/status/capture; 0 = no retry. */
+    var retries: Int = 0
 ) {
     fun normalize() {
         if (id.isBlank()) id = UUID.randomUUID().toString()
@@ -313,10 +321,12 @@ class ScenarioNode(
             outputs.clear()
             expectStatus = ""
             timeoutMs = null
+            retries = 0
         } else {
             if (requestId.isNullOrBlank()) requestId = null
             timeoutMs = timeoutMs?.coerceIn(SmartRequestState.MIN_TIMEOUT_MS, SmartRequestState.MAX_TIMEOUT_MS)
             expectStatus = expectStatus.trim()
+            retries = retries.coerceIn(0, MAX_RETRIES)
         }
     }
 
@@ -332,6 +342,7 @@ class ScenarioNode(
         copy.expectStatus = expectStatus
         copy.timeoutMs = timeoutMs
         copy.outputs = outputs.map { it.deepCopy() }.toMutableList()
+        copy.retries = retries
     }
 
     companion object {
@@ -339,6 +350,7 @@ class ScenarioNode(
         const val KIND_REQUEST = "REQUEST"
         const val KIND_END = "END"
         val KINDS = setOf(KIND_START, KIND_REQUEST, KIND_END)
+        const val MAX_RETRIES = 5
     }
 }
 
