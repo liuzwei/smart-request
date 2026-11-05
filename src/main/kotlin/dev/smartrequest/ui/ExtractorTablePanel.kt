@@ -49,7 +49,10 @@ import javax.swing.table.TableCellRenderer
 class ExtractorTablePanel(
     private val onChanged: () -> Unit = {},
     private val onRun: () -> Unit = {},
-    private val variableNamesProvider: () -> List<String> = { emptyList() }
+    private val variableNamesProvider: () -> List<String> = { emptyList() },
+    private val showRunButton: Boolean = true,
+    hintText: String = HINT,
+    hintToolTip: String = STORAGE_HINT
 ) : JBPanel<ExtractorTablePanel>(BorderLayout()) {
 
     private var target: MutableList<ResponseExtractor>? = null
@@ -59,9 +62,9 @@ class ExtractorTablePanel(
     private val addButton = flatButton("+", "Add extractor")
     private val removeButton = flatButton("−", "Remove selected extractor")
     private val runButton = flatButton("Run now", "Evaluate the rules against the last response")
-    private val hintLabel = JBLabel(HINT).apply {
+    private val hintLabel = JBLabel(hintText).apply {
         foreground = UIUtil.getContextHelpForeground()
-        toolTipText = STORAGE_HINT
+        toolTipText = hintToolTip
     }
 
     private val table: JBTable = object : ProportionalTable(model) {
@@ -88,7 +91,7 @@ class ExtractorTablePanel(
             isOpaque = false
             add(addButton)
             add(removeButton)
-            add(runButton)
+            if (showRunButton) add(runButton)
         }
 
         table.apply {
@@ -146,6 +149,8 @@ class ExtractorTablePanel(
     fun commitPendingEdit() {
         if (table.isEditing) table.cellEditor?.stopCellEditing()
     }
+
+    internal fun targetSizeForTest(): Int = target?.size ?: 0
 
     fun addRow() {
         val target = target ?: return

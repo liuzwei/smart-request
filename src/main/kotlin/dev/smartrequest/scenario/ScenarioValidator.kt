@@ -28,7 +28,9 @@ object ScenarioValidator {
 
     data class Report(
         val problems: List<Problem> = emptyList(),
-        val requestNodeCount: Int = 0
+        val requestNodeCount: Int = 0,
+        /** Variables that no upstream node captures, no environment defines, and no parameter supplies. */
+        val missingVariables: Set<String> = emptySet()
     ) {
         val errors: List<Problem> get() = problems.filter { it.severity == Severity.ERROR }
         val warnings: List<Problem> get() = problems.filter { it.severity == Severity.WARNING }
@@ -182,6 +184,7 @@ object ScenarioValidator {
         }
 
         val order = topologicalOrder(scenario.nodes, outgoing, incoming)
+        val missingVariables = LinkedHashSet<String>()
         if (order == null) {
             val cycle = findCycle(scenario.nodes, outgoing)
             val path = cycle?.joinToString(" → ") { id -> nodesById[id]?.let { label(it) } ?: id }
@@ -196,12 +199,13 @@ object ScenarioValidator {
                 label = ::label,
                 environmentVariables = environmentVariables,
                 parameterKeys = parameterKeys,
+                missingVariables = missingVariables,
                 error = ::error,
                 warn = ::warn
             )
         }
 
-        return Report(problems.toList(), requestNodes.size)
+        return Report(problems.toList(), requestNodes.size, missingVariables)
     }
 
     private fun validateOutputs(
@@ -263,6 +267,7 @@ object ScenarioValidator {
         label: (ScenarioNode) -> String,
         environmentVariables: Map<String, String>,
         parameterKeys: Set<String>,
+        missingVariables: MutableSet<String>,
         error: (String, String?, String?) -> Unit,
         warn: (String, String?, String?) -> Unit
     ) {
@@ -304,6 +309,7 @@ object ScenarioValidator {
             missing.sorted().forEach { name ->
                 val producers = producedBy[name].orEmpty().filter { it != node.id }.distinct()
                 if (producers.isEmpty()) {
+                    missingVariables.add(name)
                     error(
                         "Node '${label(node)}' needs {{$name}}; it is not an environment variable, " +
                                 "not a run parameter, and no upstream node captures it",

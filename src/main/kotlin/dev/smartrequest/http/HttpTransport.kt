@@ -43,15 +43,30 @@ class HttpTransport(
         Thread(runnable, "smart-request-http").apply { isDaemon = true }
     }
 ) {
+    /**
+     * Sends [prepared] with a one-off client that is closed when the exchange completes. Use the
+     * overload below when several requests run together (a scenario run) and should share one
+     * client, which keeps the TLS handshakes down to one per run.
+     */
     fun send(prepared: PreparedRequest): CompletableFuture<HttpResponseData> {
-        val startedAt = System.nanoTime()
-        val client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(prepared.timeoutMs.coerceAtMost(15_000).toLong()))
-            .followRedirects(
-                if (prepared.followRedirects) HttpClient.Redirect.NORMAL else HttpClient.Redirect.NEVER
-            )
-            .build()
+        val client = createClient(
+            followRedirects = prepared.followRedirects,
+            connectTimeoutMs = prepared.timeoutMs.coerceAtMost(MAX_CONNECT_TIMEOUT_MS)
+        )
+        return try {
+            send(prepared, client).whenComplete { _, _ -> client.close() }
+        } catch (e: Throwable) {
+            client.close()
+            throw e
+        }
+    }
 
+    /**
+     * Sends [prepared] with [client]. The caller owns the client: it is neither closed on success nor
+     * on failure, so the same client can send the next request of a scenario run.
+     */
+    fun send(prepared: PreparedRequest, client: HttpClient): CompletableFuture<HttpResponseData> {
+        val startedAt = System.nanoTime()
         val requestBuilder = HttpRequest.newBuilder(URI.create(prepared.url))
             .timeout(Duration.ofMillis(prepared.timeoutMs.toLong()))
 
@@ -68,42 +83,35 @@ class HttpTransport(
 
         return client.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream())
             .thenApplyAsync({ response ->
-                try {
-                    val headers = flattenHeaders(response)
-                    val contentType = headers.firstOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second
-                    val contentEncoding = headers
-                        .firstOrNull { it.first.equals("Content-Encoding", ignoreCase = true) }
-                        ?.second
-                        ?.lowercase()
+                val headers = flattenHeaders(response)
+                val contentType = headers.firstOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second
+                val contentEncoding = headers
+                    .firstOrNull { it.first.equals("Content-Encoding", ignoreCase = true) }
+                    ?.second
+                    ?.lowercase()
 
-                    val stream = decodeContent(response.body(), contentEncoding)
-                    val bytes = stream.use { readLimited(it, MAX_BODY_BYTES) }
-                    val textual = isTextual(contentType, bytes.data)
-                    val charset = charsetFrom(contentType)
-                    val bodyText = if (textual) {
-                        String(bytes.data, charset)
-                    } else {
-                        ""
-                    }
-
-                    HttpResponseData(
-                        statusCode = response.statusCode(),
-                        statusText = reasonPhrase(response.statusCode()),
-                        headers = headers,
-                        body = bodyText,
-                        bodyBytes = bytes.totalBytes,
-                        durationMs = (System.nanoTime() - startedAt) / 1_000_000,
-                        contentType = contentType,
-                        truncated = bytes.truncated,
-                        textual = textual
-                    )
-                } finally {
-                    client.close()
+                val stream = decodeContent(response.body(), contentEncoding)
+                val bytes = stream.use { readLimited(it, MAX_BODY_BYTES) }
+                val textual = isTextual(contentType, bytes.data)
+                val charset = charsetFrom(contentType)
+                val bodyText = if (textual) {
+                    String(bytes.data, charset)
+                } else {
+                    ""
                 }
+
+                HttpResponseData(
+                    statusCode = response.statusCode(),
+                    statusText = reasonPhrase(response.statusCode()),
+                    headers = headers,
+                    body = bodyText,
+                    bodyBytes = bytes.totalBytes,
+                    durationMs = (System.nanoTime() - startedAt) / 1_000_000,
+                    contentType = contentType,
+                    truncated = bytes.truncated,
+                    textual = textual
+                )
             }, executor)
-            .whenComplete { _, error ->
-                if (error != null) client.close()
-            }
     }
 
     private fun flattenHeaders(response: HttpResponse<*>): List<Pair<String, String>> {
@@ -178,6 +186,23 @@ class HttpTransport(
 
     companion object {
         const val MAX_BODY_BYTES = 5 * 1024 * 1024
+        const val MAX_CONNECT_TIMEOUT_MS = 15_000
+
+        /**
+         * A reusable client. [HttpClient] is thread-safe and keeps connections alive, so a scenario
+         * run creates one and sends every node through it. The caller must close it when done:
+         * [java.net.http.HttpClient.shutdownNow] when a run is cancelled, [java.net.http.HttpClient.close]
+         * otherwise.
+         */
+        fun createClient(
+            followRedirects: Boolean,
+            connectTimeoutMs: Int = MAX_CONNECT_TIMEOUT_MS
+        ): HttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(connectTimeoutMs.coerceAtLeast(1).toLong()))
+            .followRedirects(
+                if (followRedirects) HttpClient.Redirect.NORMAL else HttpClient.Redirect.NEVER
+            )
+            .build()
 
         fun describeError(error: Throwable): String {
             val cause = unwrap(error)

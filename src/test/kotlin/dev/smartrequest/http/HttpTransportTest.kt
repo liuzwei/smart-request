@@ -94,6 +94,28 @@ class HttpTransportTest {
         assertTrue(!response.successful)
     }
 
+    @Test
+    fun `a shared client can send several requests`() {
+        val prepared = PreparedRequest(
+            method = "GET",
+            url = "http://127.0.0.1:${server.address.port}/error",
+            headers = emptyList(),
+            body = null,
+            timeoutMs = 5_000,
+            followRedirects = true
+        )
+        val client = HttpTransport.createClient(followRedirects = true)
+        try {
+            val first = transport.send(prepared, client).get(10, TimeUnit.SECONDS)
+            val second = transport.send(prepared, client).get(10, TimeUnit.SECONDS)
+
+            assertEquals(500, first.statusCode)
+            assertEquals(500, second.statusCode)
+        } finally {
+            client.close()
+        }
+    }
+
     private fun handleEcho(exchange: HttpExchange) {
         val requestBody = exchange.requestBody.use { it.readBytes().toString(StandardCharsets.UTF_8) }
         val payload = """

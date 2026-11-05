@@ -33,6 +33,8 @@ import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
+import dev.smartrequest.scenario.OpenRequestListener
+import dev.smartrequest.scenario.ScenarioTopics
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.spring.SmartRequestTopics
 import dev.smartrequest.spring.SpringEndpointScanner
@@ -127,6 +129,16 @@ class SmartRequestPanel(
                 }
             }
         )
+        project.messageBus.connect(this).subscribe(
+            ScenarioTopics.OPEN_REQUEST,
+            object : OpenRequestListener {
+                override fun openRequest(requestId: String) {
+                    val request = service.findRequest(requestId) ?: return
+                    treePanel.selectRequest(request.id)
+                    this@SmartRequestPanel.openRequest(request)
+                }
+            }
+        )
         refreshEnvironmentCombo()
         refreshGlobals()
         showEmptyState()
@@ -177,6 +189,9 @@ class SmartRequestPanel(
         }
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
+            add(flatButton("Scenarios", null) { openScenariosToolWindow() }.apply {
+                toolTipText = "Chain requests into a scenario"
+            })
             add(flatButton("", AllIcons.Vcs.History) { openHistoryDialog() }.apply {
                 toolTipText = "Request history"
                 preferredSize = Dimension(JBUI.scale(30), JBUI.scale(28))
@@ -463,6 +478,12 @@ class SmartRequestPanel(
             refreshGlobals()
             editorPanel.refreshVariables()
         }
+    }
+
+    private fun openScenariosToolWindow() {
+        com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow("Scenarios")
+            ?.show()
     }
 
     private fun openGlobalSettings() {

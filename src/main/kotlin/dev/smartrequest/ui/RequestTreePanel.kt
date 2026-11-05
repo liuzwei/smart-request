@@ -2,7 +2,6 @@ package dev.smartrequest.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.ui.ColoredTreeCellRenderer
-import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
@@ -315,7 +314,10 @@ class RequestTreePanel(
                     icon = AllIcons.Nodes.Method
                     append(
                         data.request.method,
-                        SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, methodColor(data.request.method))
+                        SimpleTextAttributes(
+                            SimpleTextAttributes.STYLE_BOLD,
+                            HttpMethodColors.of(data.request.method)
+                        )
                     )
                     append("  ${data.request.name}", SimpleTextAttributes.REGULAR_ATTRIBUTES)
                 }
@@ -328,20 +330,5 @@ class RequestTreePanel(
     private sealed interface NodeData {
         data class Group(val group: RequestGroup) : NodeData
         data class Request(val request: HttpRequestConfig) : NodeData
-    }
-
-    companion object {
-        private val GET_COLOR = JBColor(0x1A7F37, 0x73BD79)
-        private val POST_COLOR = JBColor(0x0B5CAD, 0x6BA6E8)
-        private val PUT_COLOR = JBColor(0xA15C00, 0xD6A26A)
-        private val DELETE_COLOR = JBColor(0xC7222D, 0xFF6B68)
-
-        private fun methodColor(method: String): JBColor = when (method.uppercase()) {
-            "GET" -> GET_COLOR
-            "POST" -> POST_COLOR
-            "PUT", "PATCH" -> PUT_COLOR
-            "DELETE" -> DELETE_COLOR
-            else -> JBColor.GRAY
-        }
     }
 }

@@ -190,6 +190,24 @@ class ScenarioValidatorTest {
             report.errors.any { it.message.contains("orderId") && it.message.contains("no upstream node") },
             report.problems.joinToString { it.message }
         )
+        assertEquals(setOf("orderId"), report.missingVariables)
+    }
+
+    @Test
+    fun `a missing variable that a run parameter supplies is not reported`() {
+        val startNode = start()
+        val orderRequest = request("orders", "{{baseUrl}}/orders/{{orderId}}")
+        val orderNode = node("order-node", orderRequest.id)
+        val endNode = end()
+        val scenario = scenario(
+            startNode, orderNode, endNode,
+            edges = listOf(edge(startNode, orderNode), edge(orderNode, endNode))
+        )
+
+        val report = validate(scenario, parameters = mapOf("orderId" to "42"))
+
+        assertTrue(report.isValid, report.problems.joinToString { it.message })
+        assertTrue(report.missingVariables.isEmpty())
     }
 
     @Test

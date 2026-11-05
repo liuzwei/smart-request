@@ -11,6 +11,8 @@ import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
+import dev.smartrequest.model.ScenarioConfig
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -148,6 +150,79 @@ class SmartRequestProjectService : PersistentStateComponent<SmartRequestState> {
     }
 
     fun findGroupByName(name: String): RequestGroup? = myState.groups.firstOrNull { it.name == name }
+
+    fun scenarios(): List<ScenarioConfig> = myState.scenarios
+
+    fun scenario(id: String): ScenarioConfig? = myState.scenario(id)
+
+    /** The scenario that owns [nodeId], used by the editor tab and by diagnostics. */
+    fun scenarioOf(nodeId: String): ScenarioConfig? =
+        myState.scenarios.firstOrNull { scenario -> scenario.nodes.any { it.id == nodeId } }
+
+    fun addScenario(name: String = "New Scenario"): ScenarioConfig {
+        val scenario = ScenarioConfig(name = uniqueScenarioName(name))
+        scenario.normalize()
+        myState.scenarios.add(scenario)
+        notifyChanged()
+        return scenario
+    }
+
+    fun removeScenario(scenarioId: String) {
+        if (myState.scenarios.removeIf { it.id == scenarioId }) {
+            notifyChanged()
+        }
+    }
+
+    /**
+     * Copies a scenario with fresh node, edge and capture ids, then remaps the edges so the copy is
+     * fully independent of the original.
+     */
+    fun duplicateScenario(scenarioId: String): ScenarioConfig? {
+        val source = myState.scenario(scenarioId) ?: return null
+        val index = myState.scenarios.indexOfFirst { it.id == scenarioId }
+        val copy = source.deepCopy().apply {
+            id = UUID.randomUUID().toString()
+            name = uniqueScenarioName("${source.name} copy")
+            val nodeIds = HashMap<String, String>()
+            nodes.forEach { node ->
+                val newId = UUID.randomUUID().toString()
+                nodeIds[node.id] = newId
+                node.id = newId
+                node.outputs.forEach { output -> output.id = UUID.randomUUID().toString() }
+            }
+            edges.forEach { edge ->
+                edge.id = UUID.randomUUID().toString()
+                edge.from = nodeIds[edge.from] ?: edge.from
+                edge.to = nodeIds[edge.to] ?: edge.to
+            }
+        }
+        myState.scenarios.add(if (index >= 0) index + 1 else myState.scenarios.size, copy)
+        notifyChanged()
+        return copy
+    }
+
+    fun renameScenario(scenarioId: String, name: String): Boolean {
+        val scenario = myState.scenario(scenarioId) ?: return false
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return false
+        val next = if (myState.scenarios.any { it.id != scenarioId && it.name == trimmed }) {
+            uniqueScenarioName(trimmed)
+        } else {
+            trimmed
+        }
+        if (scenario.name == next) return false
+        scenario.name = next
+        notifyChanged()
+        return true
+    }
+
+    fun uniqueScenarioName(base: String): String {
+        val requested = base.trim().ifEmpty { "New Scenario" }
+        if (myState.scenarios.none { it.name == requested }) return requested
+        var index = 2
+        while (myState.scenarios.any { it.name == "$requested $index" }) index++
+        return "$requested $index"
+    }
 
     fun addHistory(entry: RequestHistoryEntry) {
         myState.history.add(0, entry)

@@ -1,6 +1,6 @@
 # Scenario Orchestration (Scenarios) — Implementation Plan
 
-Status: P1 (model + validation + engine) implemented; P2 (persistence + steps UI) next.
+Status: P1 (model + validation + engine) and P2 (persistence, list, steps editor, run panel) implemented; P3 (canvas) next.
 
 Confirmed decisions:
 
@@ -265,8 +265,8 @@ class ScenarioRunner(
 ### 8.1 Surface: editor tab
 
 - The tool window lists scenarios (new/rename/delete/duplicate/search) and opens a scenario in an editor tab; the same scenario always reuses the same tab.
-- Implementation: a custom `FileType` (e.g. `Scenario`) + `FileEditorProvider`, opened with a `LightVirtualFile` cached per scenario id. The tab title is the scenario name, refreshed on rename; closing the tab does not delete the scenario, and a disposed project closes the run.
-- The steps table (P2) and the canvas (P3) are two views of the same model, switchable with a segmented control in the editor toolbar, so the feature is usable before the canvas exists and stays usable for long flows.
+- Implementation: a custom `FileType` (`ScenarioFileType`) + `FileEditorProvider` + a scratch file per scenario. IntelliJ 2026.2 no longer ships a production `LightVirtualFile`, so the tab handle is an empty `.smart-scenario` file in the IDE temp directory (one directory per scenario id, file name equal to the scenario name). The file type is read-only and carries no content; the scenario itself stays in `.idea/smart-request.xml`, so there is still exactly one source of truth. A project service (`ScenarioEditorService`) caches the file per scenario, renames it with the scenario and closes it when the scenario is deleted.
+- The steps table (P2) and the canvas (P3) are two views of the same model. P2 ships the steps table; the segmented `Steps | Graph` switch and the canvas arrive in P3.
 
 ### 8.2 Editor layout (P2, steps view)
 
@@ -285,6 +285,8 @@ class ScenarioRunner(
 ```
 
 - "Runs after" is a checkbox list of the other request nodes; it is the edge editor in P2 and stays in the inspector in P3.
+- A third bottom tab, `Parameters`, edits the scenario's default parameters in the same key/value table used by the environment; the Run dialog starts from those values and lets the user override them for one run. Parameters participate in the data-flow validation, so `{{tenant}}` can be satisfied either by the environment or by a scenario parameter.
+- In P2 the header shows the scenario name, the environment selector, `Run`/`Cancel` and the validation banner; the `Steps | Graph` switch is added together with the canvas in P3.
 - New nodes get grid coordinates automatically, so the graph view is presentable as soon as it exists.
 - Requests are added from a searchable picker (grouped like the request tree); drag-and-drop from the request tree is a later addition.
 
@@ -314,7 +316,7 @@ Node width is fixed (method badge + title + captured-variable count); text is el
 Shown when the scenario has parameters or when validation found variables that must be supplied:
 
 - environment selector (defaults to the project's active environment; changing it changes the project selection);
-- parameters table (name/value, prefilled with defaults);
+- parameters table (name/value, prefilled from the scenario's `Parameters` tab), editable for this run only;
 - detected missing variables, editable for this run only;
 - `Run` is disabled while validation errors exist, with the first error shown inline.
 
@@ -332,18 +334,21 @@ Shown when the scenario has parameters or when validation found variables that m
 | `model/Models.kt` | `ScenarioConfig` / `ScenarioNode` / `ScenarioEdge`; `SmartRequestState.scenarios`, `normalize()`, version 3 |
 | `http/RequestPreparer.kt` | new `variables: Map<String, String> = emptyMap()` parameter, merged over the environment variables; existing call sites unchanged |
 | `http/HttpTransport.kt` | optional shared `HttpClient` per run (`send(prepared, client)`), so 10 nodes do not pay 10 TLS handshakes; the caller owns the client |
-| `service/SmartRequestProjectService.kt` | `scenario(id)`, `addScenario`, `removeScenario`, `duplicateScenario`, `scenarioOf(nodeId)` helpers |
-| `scenario/ScenarioValidator.kt` | pure validation (§4) |
+| `service/SmartRequestProjectService.kt` | `scenario(id)`, `addScenario`, `removeScenario`, `duplicateScenario`, `renameScenario`, `scenarioOf(nodeId)` helpers |
+| `scenario/ScenarioGraph.kt` | dependency editing, Start/End edge maintenance, cycle rejection, display order |
+| `scenario/ScenarioValidator.kt` | pure validation (§4), including `missingVariables` for the run dialog |
 | `scenario/ScenarioRunner.kt` | scheduler, run scope, results (§5–§7) |
 | `ui/ScenarioListPanel.kt` | tool window list |
-| `ui/ScenarioEditorPanel.kt` | toolbar, steps/graph switch, inspector, run panel |
-| `ui/ScenarioStepsTable.kt` | P2 table view + dependency checkboxes |
+| `ui/ScenarioEditorPanel.kt` | header, steps table, inspector, run panel, validation banner, run lifecycle |
+| `ui/ScenarioStepsTable.kt` | P2 table view, dependency column, live run status |
 | `ui/ScenarioGraphCanvas.kt` | P3 canvas |
-| `ui/ScenarioInspectorPanel.kt` | node/edge/run properties, outputs table |
+| `ui/ScenarioInspectorPanel.kt` | request/dependencies/expect status/timeout/outputs |
 | `ui/ScenarioRunPanel.kt` | results and final variables |
 | `ui/dialogs/ScenarioRunDialog.kt` | environment + parameters + missing variables |
-| `ui/ScenarioEditorProvider.kt` | `FileType` / `FileEditorProvider` / `LightVirtualFile` plumbing |
+| `ui/dialogs/RequestPickerDialog.kt` | searchable, group-aware request picker for new steps |
+| `ui/ScenarioEditorProvider.kt`, `ui/ScenarioFileType.kt`, `ui/ScenarioEditorService.kt` | editor tab plumbing and tab reuse |
 | `ui/SmartRequestPanel.kt` | subscribe to the "open request" topic; toolbar entry "Scenarios" |
+| `scenario/ScenarioTopics.kt` | cross-surface "open request" message-bus topic |
 | `META-INF/plugin.xml` | `Scenarios` tool window, file type/editor provider, description bullet |
 | `README.md`, `CHANGELOG.md` | feature docs, design notes, test counts |
 
@@ -367,11 +372,17 @@ Engine tests need no network and no sleeping:
   The round-trip currently lives in `SmartRequestPanelUiTest.testScenarioRoundTripsThroughXmlSerializer`,
   next to the request/environment round-trip test.
 - `RequestPreparerTest`: run-scope precedence and unresolved reporting.
+- `ScenarioGraphTest`: append/parallel/rewire/delete, terminal maintenance, cycle rejection, display order, ancestors/descendants, grid coordinates.
+- `ScenarioServiceTest`: create/rename/delete/duplicate (fresh node, edge and output ids), unique names, node ownership.
 - UI tests (`BasePlatformTestCase`, like the existing table tests):
-  - `ScenarioStepsTableTest`: add/remove/dependency checkboxes write the model; editing outputs updates the node;
-  - `ScenarioGraphCanvasTest`: model coordinates, hit testing, edge creation by programmatic mouse events, invalid edge rejection, delete, undo/redo, auto layout bounds;
-  - `ScenarioEditorUiTest`: open from the list, tab reuse, run panel rows, node status colors (via a test hook `nodeState(nodeId)`);
-  - `ScenarioRunDialogTest`: parameter prefilling, blocking on validation errors.
+  - `ScenarioEditorUiTest`: tab reuse/rename/close, add steps, inspector dependency editing and cycle rejection, expect-status validation, output seeding, Parameters tab feeding defaults/validation, run wired to a fake transport, and an end-to-end run against a local `HttpServer`;
+  - `ScenarioStepsTableTest` is covered by the same editor test through the `stepsTableForTest()` hooks; a dedicated class can be added when the graph view starts sharing the table;
+  - `ScenarioGraphCanvasTest`: model coordinates, hit testing, edge creation by programmatic mouse events, invalid edge rejection, delete, undo/redo, auto layout bounds (P3);
+  - `ScenarioListPanelUiTest`: create/filter/duplicate/delete, action enablement;
+  - `ScenarioRunDialogUiTest`: parameter prefill, missing variables, environment selection, structural errors;
+  - `ScenarioRunPanelUiTest`: live statuses, final summary, skipped rows, producer labels;
+  - `RequestPickerDialogUiTest`: filtering by name/method and selection;
+  - `HttpTransportTest`: one shared client sends several requests.
 
 Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"`.
 
@@ -388,11 +399,12 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 
 ### P2 — persistence, list, steps table, run panel
 
-- [ ] Scenarios tool window (new/rename/delete/duplicate), editor tab reuse.
-- [ ] Steps table with dependency editing, request picker, outputs/expect-status/timeout inspector.
-- [ ] Validation banner, Run dialog, run panel with live statuses, final variables.
-- [ ] `HttpTransport` shared client for runs.
+- [x] Scenarios tool window (new/rename/delete/duplicate), editor tab reuse.
+- [x] Steps table with dependency editing, request picker, outputs/expect-status/timeout inspector.
+- [x] Validation banner, Run dialog, run panel with live statuses, final variables.
+- [x] `HttpTransport` shared client for runs.
 - Acceptance: from a clean project, create a 3-node scenario, pass a token between nodes, run it against a local server, see per-node results; delete a request and confirm the run is blocked with a clear message.
+  Covered by `ScenarioEditorUiTest.testRunAgainstALocalServerUsesTheSharedClient` (real `HttpServer`, captured token used by the next step) and by the validator's deleted-request error, which disables the dialog's Run button.
 
 ### P3 — canvas
 
@@ -418,5 +430,7 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 - **Deleted requests**: nodes keep the id and are reported; no silent data loss.
 - **Parallel duplicate writes**: warned at validation, last write wins at run time (producer is recorded).
 - **Memory**: the last run keeps one `HttpResponseData` per node (bodies already capped at 5 MB); cleared on the next run or when the editor closes.
-- **Threads**: a run owns two daemon thread pools and only releases them when it finishes or is cancelled; the editor must call `cancel()` on dispose (P2), otherwise an abandoned run keeps its pools alive.
+- **Threads**: a run owns two daemon thread pools; `ScenarioEditorPanel.dispose()` cancels the active run and shuts the shared client down (verified in the editor tests), so closing the tab does not leave pools or sockets behind.
+- **Editor tab handle**: 2026.2 no longer ships a production `LightVirtualFile`, so the tab is backed by an empty file in the IDE temp directory. The file is read-only and never holds data; renaming the scenario renames the file and updates the tab. Temp files are left in place when a scenario is deleted (they are empty and tiny); a later cleanup can remove the directory on project close.
+- **Run scope is intentionally transient**: the last run (including response bodies) lives only in the editor; closing the tab drops it. A future run-history feature would need its own storage decision.
 - **Later candidates**: failure branches, assertion nodes, `foreach` sub-flows, retries/delays, JSON export, JUnit export, run history, CI runner.

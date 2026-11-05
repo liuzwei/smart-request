@@ -112,6 +112,19 @@
 - 写入的变量立即生效，`{{token}}` 的高亮与补全也会刷新。
 - 变量保存在 `.idea/smart-request.xml` 中，属于**明文**存储，注意不要提交真实 token。
 
+### 场景编排（Scenarios）
+
+把多个已保存的请求串成一条活动网络图（Start → 请求节点 → End），一次运行整条链路；上游响应里的值可以作为下游的 `{{变量}}`。
+
+- 右侧 `Scenarios` 工具窗口：新建、重命名、复制、删除场景；双击打开场景编辑器 Tab（同一个场景只开一个 Tab）。
+- 步骤表：每行一个请求节点，按依赖顺序排列；`+ Add step` 从可搜索的请求选择器里添加；新步骤默认接在上一步后面，也可以在 `Runs after` 里改依赖，形成并行分支或汇合。
+- 每个步骤可以单独设置 `Expect status`（空 = 200–399，支持 `2xx`、`404`、`200-299`、`200,201`）、超时（空 = 项目默认）和出参规则（JSONPath，与 Extract 相同）；`Sync from request` 可复制请求自带的 Extract 规则。
+- 场景级参数（默认值）在 `Parameters` Tab 中维护，运行对话框里可以按次覆盖；参数同样参与变量数据流校验。
+- 运行前做静态校验：环、不可达/到不了 End、请求已删除、变量数据流（某个 `{{token}}` 没有任何上游节点产出）、并行写同名变量。顶部显示 `✓ Valid` / `N error(s)`，点击可看全部问题并跳到对应步骤。
+- `Run`：有参数或缺失变量时打开运行对话框（选择环境、填写参数/缺失变量）；运行中逐步显示状态、HTTP 状态、耗时和抓到的值；失败即停，未开始的步骤标记为 skipped。
+- 抓到的值只存在于本次运行（run scope），不会写回环境；运行结束后面板底部列出最终变量（名称、值、来源步骤），可一键复制。
+- 步骤表当前是主要视图，图形画布在后续版本加入。
+
 ### 复制为 cURL
 
 - 在请求树中右键请求 → `Copy as cURL`，支持：
@@ -373,7 +386,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（217 个）：
+当前测试覆盖（254 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -395,9 +408,13 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 真实本地 HTTP Server 的 GET/POST、gzip 解压、错误状态码
 - `.idea/smart-request.xml` 对应模型（含 Path 参数、History 快照、环境级全局 Header/Params）的 XmlSerializer 往返测试
 - 场景模型：normalize 自动补齐 `START` / `END`、清理悬空边与重复终端、并行上限、深拷贝不共享节点/边/出参
+- 场景图编辑：默认串行追加、并行分支、改依赖后 Start/End 自动重连、环被原子拒绝、删除中间步骤重连上下游、执行顺序
 - 场景校验：环、不可达节点、到不了 `END` 的死路、请求已删除、变量数据流（缺变量、产出者不在上游）、并行写同名变量警告、参数被出参遮蔽、重复依赖、非法 `expectStatus` / JSONPath、`baseUrl` 参数、禁用行不需要变量
 - 场景执行引擎：线性传参、fork/join 等待、并行上限、失败即停（取消在飞节点、跳过剩余节点）、`expectStatus`、出参失败不泄漏、参数 > 环境 / 出参 > 参数的优先级、请求丢失、取消、失败后结果仍完整
 - 场景的 XmlSerializer 往返：节点、连线、出参、`expectStatus`、超时、并行度、参数
+- 场景服务：新建/重命名/删除/复制（节点、边、出参 ID 全部重映射）、唯一命名、节点归属查找
+- 场景 UI：Scenarios 工具窗的增删改查与过滤、编辑器 Tab 复用/重命名/删除后关闭、步骤表与检查器（依赖勾选、环拒绝、expectStatus、出参同步）、场景参数 Tab 参与校验、运行对话框（默认参数、缺失变量、环境选择、结构错误阻止运行）、逐步骤运行面板与最终变量表
+- 场景端到端：假 transport 的 UI 运行、共享 `HttpClient` 连续发请求、真实本地 HTTP Server 的登录拿 token → 下游请求使用 token
 - 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
 - 请求右键菜单 `Move to Group` 的子菜单内容与回调
 - 变量高亮、Path 参数自动同步
@@ -483,6 +500,16 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 
 提取失败时旧值会被保留，例如接口临时返回 `{"data":null}`，不会把可用的 token 冲掉。
 
+### 场景编排（Scenarios）
+
+1. 点击工具栏 `Scenarios` 打开右侧场景列表，点 `New`。
+2. 在打开的编辑器里点 `+ Add step`，选择登录请求；再添加订单请求，默认接在登录之后。
+3. 选中登录步骤，在 `Captures` 里加一条 `token ← data.token`；选中订单步骤，把 URL 写成 `...?token={{token}}`。
+4. 如果接口需要租户之类的输入，在 `Parameters` Tab 里加一行默认值；运行对话框可以按次覆盖。
+5. 点 `Run`。如果 `token` 没有上游产出，运行对话框会提示缺失变量；如果它由登录步骤产出，直接运行。
+6. 运行面板逐行显示 passed/failed/skipped、HTTP 状态、耗时和抓到的值；失败时后面的步骤不会执行。
+7. 删除被引用的请求后，顶部会显示错误并阻止运行，避免跑到一半才发现。
+
 ### 移动请求到其他分组
 
 1. 在左侧请求树右键要移动的请求。
@@ -536,7 +563,12 @@ src/main/kotlin/dev/smartrequest/
 │   ├── PathParameterResolver.kt # {path} 参数替换与编码
 │   ├── CurlCommandBuilder.kt# Linux/PowerShell cURL 生成
 │   └── VariableResolver.kt  # {{variable}} 递归解析
-├── model/                   # 持久化模型（环境、请求、历史）
+├── model/                   # 持久化模型（环境、请求、场景、历史）
+├── scenario/                # 场景编排：图编辑、校验、DAG 执行
+│   ├── ScenarioGraph.kt     # 依赖编辑、Start/End 自动连线、执行顺序
+│   ├── ScenarioValidator.kt # 结构 + 变量数据流校验
+│   ├── ScenarioRunner.kt    # 失败即停的 DAG 调度与运行作用域
+│   └── StatusExpectation.kt # expectStatus 表达式
 ├── extract/                 # 响应提取：JSON 读取、路径求值、写回环境变量
 │   ├── JsonPath.kt          # 无依赖 JSON 读取与 data./headers./status 路径求值
 │   └── ResponseExtractorEngine.kt # 规则求值、失败不覆盖、变量写回与结果报告
@@ -557,7 +589,14 @@ src/main/kotlin/dev/smartrequest/
 │   ├── TableLayout.kt       # 表格列宽比例分配与单击编辑
 │   ├── VariableTextSupport.kt# 变量高亮与补全
 │   ├── VariableHtml.kt      # 表格变量高亮
-│   └── dialogs/             # 环境设置（变量/全局头/全局参数）、请求设置、历史记录
+│   ├── ScenarioListPanel.kt # Scenarios 工具窗（新建/重命名/复制/删除/过滤）
+│   ├── ScenarioEditorPanel.kt# 场景 Tab：步骤表、检查器、运行面板、校验条
+│   ├── ScenarioStepsTable.kt# 步骤表（依赖、运行状态、抓取值）
+│   ├── ScenarioInspectorPanel.kt# 请求/依赖/expectStatus/超时/出参
+│   ├── ScenarioRunPanel.kt  # 逐步骤结果与最终运行变量
+│   ├── ScenarioFileType.kt  # 场景 Tab 的文件类型
+│   ├── ScenarioEditorProvider.kt # FileEditorProvider 与 Tab 复用
+│   └── dialogs/             # 环境设置、请求设置、历史、场景运行、请求选择器
 └── util/JsonPrettyPrinter.kt# 无依赖 JSON 格式化
 ```
 
@@ -587,6 +626,15 @@ src/main/kotlin/dev/smartrequest/
    - 不引入 JS 引擎或 JSONPath 依赖，插件体积和启动不受影响。
    - 代价是比脚本表达力弱：目前没有断言、条件、循环和数组批量提取。
 
+6. **场景运行只写运行作用域，不写环境**
+   - 并行分支和重复运行时结果才可预期；一次成功的联调不会悄悄改掉下一次手动请求的变量。
+   - 运行结束在面板里列出最终变量，需要的话手动复制到环境。
+   - 运行前用静态数据流校验，尽量在发出第一个请求前发现缺变量，而不是跑到一半才失败。
+
+7. **场景编辑器是编辑器 Tab，但数据仍在项目 XML 里**
+   - Tab 可以拆分、并排、重新打开，符合“看整条链路”的使用方式；场景本身仍跟随 `.idea/smart-request.xml`，不产生第二份数据。
+   - 2026.2 的平台不再提供生产可用的 `LightVirtualFile`，因此 Tab 用一个临时目录里的空 `.smart-scenario` 文件作为句柄，文件只承载 Tab，不保存内容。
+
 ---
 
 ## 7. 已知限制
@@ -602,6 +650,7 @@ src/main/kotlin/dev/smartrequest/
 - Spring 扫描只识别直接标注的注解，不识别自定义组合注解；Body 生成基于 DTO 字段和字段注解，不解析完整 Swagger/OpenAPI schema 或方法级 `@Operation` 里的 requestBody 示例。
 - 表格行不支持拖拽排序，也不支持从剪贴板批量粘贴多行 `Key: Value`。
 - URL 同步只覆盖 Query 部分；修改 URL 里的 Path `{占位符}` 会增删 Path Params 行，但反过来在表格里改不了 Path 名。
+- 场景目前是步骤表视图，图形画布、拖拽连线、撤销/重做在后续版本；不支持循环、条件分支、失败分支、重试、延迟和定时运行；运行结果只在当前 IDE 会话保留。
 
 ---
 
