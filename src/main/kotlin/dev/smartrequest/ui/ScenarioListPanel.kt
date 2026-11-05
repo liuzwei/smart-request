@@ -1,6 +1,5 @@
 package dev.smartrequest.ui
 
-import com.intellij.icons.AllIcons
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
@@ -35,18 +34,22 @@ import java.awt.event.MouseEvent
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JList
+import javax.swing.JMenuItem
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 /**
- * Tool window list of the project's scenarios: create, rename, duplicate, delete and open. The
- * editor itself lives in an editor tab so it can use the full width and be split.
+ * The scenario list under the request tree in the Smart Request tool window. Selecting a scenario
+ * opens it in the panel on the right, exactly like selecting a request opens the request editor.
+ * The window has no separate Scenarios tool window or editor tab.
  */
 class ScenarioListPanel(
-    private val project: Project
+    private val project: Project,
+    private val onOpen: (ScenarioConfig) -> Unit = {}
 ) : JBPanel<ScenarioListPanel>(BorderLayout()), Disposable {
 
     private val service = project.service<SmartRequestProjectService>()
@@ -55,18 +58,35 @@ class ScenarioListPanel(
         selectionMode = ListSelectionModel.SINGLE_SELECTION
         cellRenderer = ScenarioRenderer()
         border = JBUI.Borders.empty(4)
-        visibleRowCount = 14
-        addListSelectionListener { if (!rebuilding && !it.valueIsAdjusting) updateButtons() }
+        visibleRowCount = 8
+        addListSelectionListener {
+            if (rebuilding || it.valueIsAdjusting) return@addListSelectionListener
+            selectedScenario()?.let(onOpen)
+        }
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(event: MouseEvent) {
-                if (event.clickCount == 2 && SwingUtilities.isLeftMouseButton(event)) {
-                    selectedScenario()?.let(::open)
+                if (SwingUtilities.isRightMouseButton(event)) {
+                    val index = locationToIndex(event.point)
+                    if (index >= 0) {
+                        // Select for the context menu, but do not open the scenario on a right click.
+                        rebuilding = true
+                        try {
+                            selectedIndex = index
+                        } finally {
+                            rebuilding = false
+                        }
+                    }
+                    showActionsMenu(this@apply, event.x, event.y)
+                } else if (SwingUtilities.isLeftMouseButton(event)) {
+                    // Re-open the already-selected scenario as well: selecting a request switches the
+                    // right pane away and a second click should bring the scenario back.
+                    if (locationToIndex(event.point) >= 0) selectedScenario()?.let(onOpen)
                 }
             }
         })
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(event: KeyEvent) {
-                if (event.keyCode == KeyEvent.VK_ENTER) selectedScenario()?.let(::open)
+                if (event.keyCode == KeyEvent.VK_ENTER) selectedScenario()?.let(onOpen)
             }
         })
     }
@@ -76,27 +96,16 @@ class ScenarioListPanel(
     private val emptyLabel = JBLabel("No scenarios yet. Create one to chain requests.").apply {
         foreground = UIUtil.getContextHelpForeground()
         horizontalAlignment = JBLabel.CENTER
-        border = JBUI.Borders.empty(8)
+        border = JBUI.Borders.empty(6)
     }
-
-    private val newButton = JButton("New", AllIcons.General.Add)
-    private val renameButton = JButton("Rename", null)
-    private val duplicateButton = JButton("Duplicate", AllIcons.Actions.Copy)
-    private val deleteButton = JButton("Delete", AllIcons.General.Remove)
-    private val exportButton = JButton("Export…", null)
-    private val importButton = JButton("Import…", null)
+    private val newButton = smallButton("+", "New scenario") { createScenario() }
+    private val moreButton = smallButton("⋯", "Scenario actions") { showMoreMenu() }
 
     private var rebuilding = false
     private val stateListener: () -> Unit = { rebuild() }
 
     init {
         border = JBUI.Borders.empty(4)
-        newButton.addActionListener { createScenario() }
-        renameButton.addActionListener { renameSelected() }
-        duplicateButton.addActionListener { duplicateSelected() }
-        deleteButton.addActionListener { deleteSelected() }
-        exportButton.addActionListener { exportSelected() }
-        importButton.addActionListener { importFile() }
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = rebuild()
             override fun removeUpdate(e: DocumentEvent) = rebuild()
@@ -104,8 +113,8 @@ class ScenarioListPanel(
         })
 
         add(buildHeader(), BorderLayout.NORTH)
-        add(JBScrollPane(list).apply { border = JBUI.Borders.emptyTop(4) }, BorderLayout.CENTER)
-        add(buildFooter(), BorderLayout.SOUTH)
+        add(JBScrollPane(list).apply { border = JBUI.Borders.emptyTop(2) }, BorderLayout.CENTER)
+        add(emptyLabel, BorderLayout.SOUTH)
 
         service.addChangeListener(stateListener)
         rebuild()
@@ -116,37 +125,56 @@ class ScenarioListPanel(
             isOpaque = false
             border = JBUI.Borders.emptyBottom(2)
         }
-        val title = JBLabel("Scenarios").apply { font = font.deriveFont(Font.BOLD) }
-        header.add(title, BorderLayout.NORTH)
+        val titleRow = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(JBLabel("Scenarios").apply { font = font.deriveFont(Font.BOLD) }, BorderLayout.WEST)
+            add(
+                JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0)).apply {
+                    isOpaque = false
+                    add(newButton)
+                    add(moreButton)
+                },
+                BorderLayout.EAST
+            )
+        }
+        header.add(titleRow, BorderLayout.NORTH)
         header.add(searchField, BorderLayout.CENTER)
-        val buttons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque = false
-            add(newButton)
-            add(renameButton)
-            add(duplicateButton)
-            add(deleteButton)
-        }
-        val fileButtons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque = false
-            add(importButton)
-            add(exportButton)
-        }
-        val actions = JBPanel<JBPanel<*>>(BorderLayout(0, 2)).apply {
-            isOpaque = false
-            add(buttons, BorderLayout.NORTH)
-            add(fileButtons, BorderLayout.SOUTH)
-        }
-        header.add(actions, BorderLayout.SOUTH)
         return header
     }
 
-    private fun buildFooter(): JPanel {
-        val footer = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque = false
-            add(emptyLabel)
+    private fun smallButton(text: String, tooltip: String, action: () -> Unit): JButton =
+        JButton(text).apply {
+            toolTipText = tooltip
+            isFocusPainted = false
+            margin = JBUI.insets(1, 4)
+            font = font.deriveFont(Font.BOLD, font.size2D - 1f)
+            preferredSize = Dimension(JBUI.scale(if (text.length <= 1) 26 else 34), JBUI.scale(24))
+            addActionListener { action() }
         }
-        return footer
+
+    private fun showMoreMenu() {
+        showActionsMenu(moreButton, 0, moreButton.height)
     }
+
+    private fun showActionsMenu(anchor: Component, x: Int, y: Int) {
+        val selected = selectedScenario() != null
+        val menu = JPopupMenu()
+        menu.add(menuItem("New Scenario") { createScenario() })
+        menu.addSeparator()
+        menu.add(menuItem("Rename…", selected) { renameSelected() })
+        menu.add(menuItem("Duplicate", selected) { duplicateSelected() })
+        menu.add(menuItem("Delete", selected) { deleteSelected() })
+        menu.addSeparator()
+        menu.add(menuItem("Import…") { importFile() })
+        menu.add(menuItem("Export…", selected) { exportSelected() })
+        menu.show(anchor, x, y)
+    }
+
+    private fun menuItem(text: String, enabled: Boolean = true, action: () -> Unit): JMenuItem =
+        JMenuItem(text).apply {
+            isEnabled = enabled
+            addActionListener { action() }
+        }
 
     private fun rebuild() {
         val selectedId = list.selectedValue?.id
@@ -165,7 +193,6 @@ class ScenarioListPanel(
                 "No scenario matches the filter."
             }
             val target = scenarios.firstOrNull { it.id == selectedId }
-                ?: scenarios.firstOrNull()
             if (target != null) {
                 list.setSelectedValue(target, true)
             } else {
@@ -174,24 +201,14 @@ class ScenarioListPanel(
         } finally {
             rebuilding = false
         }
-        updateButtons()
-    }
-
-    private fun updateButtons() {
-        val selected = selectedScenario() != null
-        renameButton.isEnabled = selected
-        duplicateButton.isEnabled = selected
-        deleteButton.isEnabled = selected
-        exportButton.isEnabled = selected
     }
 
     private fun selectedScenario(): ScenarioConfig? = list.selectedValue
 
-    private fun createScenario() {
+    fun createScenario() {
         val scenario = service.addScenario("New Scenario")
         rebuild()
         list.setSelectedValue(scenario, true)
-        open(scenario)
     }
 
     private fun renameSelected() {
@@ -214,7 +231,6 @@ class ScenarioListPanel(
         val copy = service.duplicateScenario(scenario.id) ?: return
         rebuild()
         list.setSelectedValue(copy, true)
-        open(copy)
     }
 
     private fun deleteSelected() {
@@ -266,7 +282,6 @@ class ScenarioListPanel(
             val text = String(file.contentsToByteArray(), Charsets.UTF_8)
             val scenario = importScenario(text)
             list.setSelectedValue(scenario, true)
-            open(scenario)
             notify("Imported scenario '${scenario.name}'.", NotificationType.INFORMATION)
         } catch (e: ScenarioJsonException) {
             notify(e.message ?: "The file is not a valid scenario.", NotificationType.WARNING)
@@ -309,16 +324,7 @@ class ScenarioListPanel(
             .notify(project)
     }
 
-    private fun open(scenario: ScenarioConfig) {
-        ScenarioEditorService.getInstance(project).open(scenario.id)
-    }
-
     // Test hooks.
-
-    internal fun exportForTest(scenarioId: String): String? =
-        service.scenario(scenarioId)?.let { encodeScenario(it) }
-
-    internal fun importForTest(text: String): ScenarioConfig = importScenario(text)
 
     internal fun scenarioCount(): Int = model.size()
 
@@ -333,12 +339,14 @@ class ScenarioListPanel(
     internal fun createForTest(): ScenarioConfig {
         val scenario = service.addScenario("New Scenario")
         rebuild()
+        list.setSelectedValue(scenario, true)
         return scenario
     }
 
     internal fun duplicateForTest(id: String): ScenarioConfig? {
-        val copy = service.duplicateScenario(id)
+        val copy = service.duplicateScenario(id) ?: return null
         rebuild()
+        list.setSelectedValue(copy, true)
         return copy
     }
 
@@ -352,7 +360,12 @@ class ScenarioListPanel(
         rebuild()
     }
 
-    internal fun isDeleteEnabled(): Boolean = deleteButton.isEnabled
+    internal fun isDeleteEnabled(): Boolean = selectedScenario() != null
+
+    internal fun exportForTest(scenarioId: String): String? =
+        service.scenario(scenarioId)?.let { encodeScenario(it) }
+
+    internal fun importForTest(text: String): ScenarioConfig = importScenario(text)
 
     override fun dispose() {
         service.removeChangeListener(stateListener)

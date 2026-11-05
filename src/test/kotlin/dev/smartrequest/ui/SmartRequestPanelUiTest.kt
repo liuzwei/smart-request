@@ -16,6 +16,7 @@ import dev.smartrequest.model.ScenarioNode
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.dialogs.EnvironmentDialog
 import dev.smartrequest.ui.dialogs.HistoryDialog
+import java.awt.image.BufferedImage
 
 /**
  * Smoke test that constructs the complete tool window in a real IntelliJ project. This catches
@@ -31,6 +32,46 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         EdtTestUtil.runInEdtAndWait<RuntimeException> {
             Disposer.dispose(panel)
         }
+    }
+
+    fun testScenarioListOpensTheScenarioInTheRightPane() {
+        val service = project.service<SmartRequestProjectService>()
+        val panel = EdtTestUtil.runInEdtAndGet<SmartRequestPanel, RuntimeException> {
+            SmartRequestPanel(project)
+        }
+        val scenario = EdtTestUtil.runInEdtAndGet<ScenarioConfig, RuntimeException> {
+            service.addScenario("Embedded")
+        }
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            panel.scenarioListForTest().select(scenario.id)
+        }
+
+        val embedded = panel.scenarioPanelForTest()
+        assertNotNull(embedded)
+        assertEquals(scenario.id, embedded!!.scenarioIdForTest())
+        assertEquals("scenario", panel.contentCardForTest())
+        assertTrue(paintToImage(panel))
+
+        val request = service.state().groups.first().requests.first()
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            project.messageBus
+                .syncPublisher(dev.smartrequest.scenario.ScenarioTopics.OPEN_REQUEST)
+                .openRequest(request.id)
+        }
+        assertEquals("request", panel.contentCardForTest())
+        assertTrue(paintToImage(panel))
+
+        EdtTestUtil.runInEdtAndWait<RuntimeException> {
+            Disposer.dispose(panel)
+        }
+    }
+
+    private fun paintToImage(panel: SmartRequestPanel): Boolean {
+        panel.setSize(1200, 800)
+        panel.doLayout()
+        val image = BufferedImage(1200, 800, BufferedImage.TYPE_INT_ARGB)
+        panel.paint(image.createGraphics())
+        return true
     }
 
     fun testPanelDetectsPathParametersOnOpen() {

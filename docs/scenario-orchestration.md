@@ -4,7 +4,7 @@ Status: P1–P4 implemented. The feature is ready for hands-on testing; see §11
 
 Confirmed decisions:
 
-- The editor is an **editor tab** (wide canvas, splittable, re-openable), not a tool-window pane and not a floating dialog.
+- The scenario editor is the **right pane of the Smart Request tool window**. Scenarios are listed under the request tree, next to requests; there is no separate Scenarios tool window and no editor tab.
 - Delivery in two steps: **engine + steps table first, canvas second**. The steps table stays as a secondary view.
 - Failure semantics: **fail fast**. The first failed node ends the run; nodes that are still in flight are cancelled and nodes that have not started are skipped. No failure branches in v1.
 - Captured values go to the **run scope only**. A scenario run never writes `.idea/smart-request.xml`. Single-request Extract keeps its current behaviour (it writes the environment); the difference is intentional and is explained in the UI.
@@ -264,13 +264,14 @@ class ScenarioRunner(
 
 ## 8. UI
 
-### 8.1 Surface: editor tab
+### 8.1 Surface: right pane of the request tool window
 
-- The tool window lists scenarios (new/rename/delete/duplicate/search) and opens a scenario in an editor tab; the same scenario always reuses the same tab.
-- Implementation: a custom `FileType` (`ScenarioFileType`) + `FileEditorProvider` + a scratch file per scenario. IntelliJ 2026.2 no longer ships a production `LightVirtualFile`, so the tab handle is an empty `.smart-scenario` file in the IDE temp directory (one directory per scenario id, file name equal to the scenario name). The file type is read-only and carries no content; the scenario itself stays in `.idea/smart-request.xml`, so there is still exactly one source of truth. A project service (`ScenarioEditorService`) caches the file per scenario, renames it with the scenario and closes it when the scenario is deleted.
-- The steps table (P2) and the canvas (P3) are two views of the same model. P2 ships the steps table; the segmented `Steps | Graph` switch and the canvas arrive in P3.
+- The Smart Request tool window's left column is a vertical splitter: the request tree on top and the scenario list below. Selecting a request or a scenario opens the matching editor in the right pane, so both surfaces behave the same way and there is no second tool-window icon.
+- `ScenarioListPanel` is embedded below `RequestTreePanel`; it has a compact `+` action and a `⋯` menu (rename, duplicate, delete, import, export). Selecting a scenario calls the panel callback immediately, including clicking the already-selected scenario after the request editor was opened.
+- `ScenarioEditorPanel` is added to a `CardLayout` right pane. Switching to a request hides the scenario pane but keeps its last run; opening another scenario disposes the previous panel and cancels its active run; deleting the open scenario removes the pane and falls back to the request editor.
+- The steps table (P2) and the canvas (P3) remain two views of the same model, switchable with the segmented control in the scenario header.
 
-### 8.2 Editor layout (P2, steps view)
+### 8.2 Scenario pane layout (P2, steps view)
 
 ```
 ┌ Checkout flow ──────────────────────────────── [Steps|Graph]  Env: dev  ▶Run ✔Valid ┐
@@ -292,7 +293,7 @@ class ScenarioRunner(
 - New nodes get grid coordinates automatically, so the graph view is presentable as soon as it exists.
 - Requests are added from a searchable picker (grouped like the request tree); drag-and-drop from the request tree is a later addition.
 
-### 8.3 Editor layout (P3, graph view)
+### 8.3 Graph layout (P3, graph view)
 
 ```
 (Start)──▶[POST /auth/login]──┬──▶[GET /user/profile]──┐
@@ -352,8 +353,8 @@ Shown when the scenario has parameters or when validation found variables that m
 | `scenario/ScenarioImporter.kt` | creates requests/groups, remaps nodes and edges on import |
 | `scenario/ScenarioValidator.kt` | pure validation (§4), including `missingVariables` for the run dialog |
 | `scenario/ScenarioRunner.kt` | scheduler, run scope, retries, optional captures, results (§5–§7) |
-| `ui/ScenarioListPanel.kt` | tool window list, JSON export/import |
-| `ui/ScenarioEditorPanel.kt` | header, Steps/Graph switch, inspector, run panel, Response tab, validation banner, undo/redo, run lifecycle |
+| `ui/ScenarioListPanel.kt` | list embedded below the request tree; JSON export/import |
+| `ui/ScenarioEditorPanel.kt` | scenario right pane: header, Steps/Graph switch, inspector, run panel, Response tab, validation banner, undo/redo, run lifecycle |
 | `ui/ScenarioStepsTable.kt` | P2 table view, dependency column, live run status |
 | `ui/ScenarioGraphCanvas.kt` | P3 canvas: painting, hit testing, drag, ports, edges, zoom/pan, fit, auto layout, run states, request drops |
 | `ui/ScenarioInspectorPanel.kt` | request/dependencies/expect status/timeout/retries/outputs (required column) |
@@ -362,10 +363,9 @@ Shown when the scenario has parameters or when validation found variables that m
 | `ui/dialogs/RequestPickerDialog.kt` | searchable, group-aware request picker for new steps |
 | `ui/RequestDragData.kt`, `ui/RequestTreePanel.kt` | request-tree drag source and payload |
 | `ui/ResponsePanel.kt` | read-only response viewer reused by the Response tab |
-| `ui/ScenarioEditorProvider.kt`, `ui/ScenarioFileType.kt`, `ui/ScenarioEditorService.kt` | editor tab plumbing and tab reuse |
-| `ui/SmartRequestPanel.kt` | subscribe to the "open request" topic; toolbar entry "Scenarios" |
+| `ui/SmartRequestPanel.kt` | request/scenario CardLayout in the right pane; scenario list below the request tree; subscribe to the "open request" topic |
 | `scenario/ScenarioTopics.kt` | cross-surface "open request" message-bus topic |
-| `META-INF/plugin.xml` | `Scenarios` tool window, file type/editor provider, description bullet |
+| `META-INF/plugin.xml` | one `Smart Request` tool window (scenarios are embedded), description bullet |
 | `README.md`, `CHANGELOG.md` | feature docs, design notes, test counts |
 
 ## 10. Testing
@@ -420,7 +420,7 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 
 ### P2 — persistence, list, steps table, run panel
 
-- [x] Scenarios tool window (new/rename/delete/duplicate), editor tab reuse.
+- [x] Scenarios list under the request tree; selecting a scenario opens it in the right pane (same panel reused for the same scenario).
 - [x] Steps table with dependency editing, request picker, outputs/expect-status/timeout inspector.
 - [x] Validation banner, Run dialog, run panel with live statuses, final variables.
 - [x] `HttpTransport` shared client for runs.
@@ -448,7 +448,7 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 ## 12. Risks and later work
 
 - **Canvas interaction** was the largest unknown and is now implemented with plain Swing: geometry (ports, hit testing, edge picking, layout) is covered by deterministic tests that do not depend on rendering. The interaction set is still deliberately the seven actions above; no marquee selection, orthogonal routing or minimap in v1.
-- **Undo stack scope**: snapshots contain nodes and edges (positions, captures, dependencies), not scenario parameters or the name. A rejected dependency edit is rolled back out of the stack. The stack is in-memory per editor tab and is dropped when the tab closes.
+- **Undo stack scope**: snapshots contain nodes and edges (positions, captures, dependencies), not scenario parameters or the name. A rejected dependency edit is rolled back out of the stack. The stack is in-memory per open scenario panel and is dropped when another scenario is opened or the tool window closes.
 - **Semantics edge cases** concentrate in joins/fail-fast/cancel; model them as a table of tests, one per rule.
 - **No failure branches in v1** means error-path flows cannot be expressed as branches; `expectStatus` covers "this 404 is expected". If needed, add `EdgeCondition` later without migration.
 - **`.idea` sharing**: scenarios live next to request definitions and are not shared by default. P4 exports a self-contained JSON (requests, groups, outputs, retries, positions) and imports it into new requests/scenarios; it does not merge or update existing requests.
@@ -458,6 +458,6 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 - **Retries**: retries are immediate (no backoff) and each attempt gets the node timeout, so a run can take `(retries + 1) × timeout` for that node. This is documented in the inspector tooltip and keeps the engine simple.
 - **Memory**: the last run keeps one `HttpResponseData` per node (bodies already capped at 5 MB); cleared on the next run or when the editor closes.
 - **Threads**: a run owns two daemon thread pools; `ScenarioEditorPanel.dispose()` cancels the active run and shuts the shared client down (verified in the editor tests), so closing the tab does not leave pools or sockets behind.
-- **Editor tab handle**: 2026.2 no longer ships a production `LightVirtualFile`, so the tab is backed by an empty file in the IDE temp directory. The file is read-only and never holds data; renaming the scenario renames the file and updates the tab. Temp files are left in place when a scenario is deleted (they are empty and tiny); a later cleanup can remove the directory on project close.
-- **Run scope is intentionally transient**: the last run (including response bodies) lives only in the editor; closing the tab drops it. A future run-history feature would need its own storage decision.
+- **Embedded scenario pane**: only one scenario panel is alive at a time. Switching to a request hides it (its last run is kept); opening another scenario disposes it and cancels an active run. Deleting the open scenario falls back to the request editor.
+- **Run scope is intentionally transient**: the last run (including response bodies) lives only while the scenario panel is alive; opening another scenario or closing the tool window drops it. A future run-history feature would need its own storage decision.
 - **Later candidates**: failure branches, assertion nodes, `foreach` sub-flows, retry delays/backoff, JUnit export, run history, CI runner, explicit request matching/merging on JSON import.

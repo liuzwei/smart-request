@@ -35,24 +35,12 @@
                 anchor="right"
                 icon="/icons/smartRequest.svg"
                 factoryClass="dev.smartrequest.ui.SmartRequestToolWindowFactory"/>
-        <toolWindow
-                id="Scenarios"
-                anchor="right"
-                icon="/icons/smartRequest.svg"
-                factoryClass="dev.smartrequest.ui.ScenarioToolWindowFactory"/>
         <notificationGroup
                 id="Smart Request"
                 displayType="BALLOON"/>
         <codeInsight.lineMarkerProvider
                 language="JAVA"
                 implementationClass="dev.smartrequest.editor.SmartRequestLineMarkerProvider"/>
-        <fileType
-                name="Smart Request Scenario"
-                implementationClass="dev.smartrequest.ui.ScenarioFileType"
-                fieldName="INSTANCE"
-                extensions="smart-scenario"/>
-        <fileEditorProvider
-                implementation="dev.smartrequest.ui.ScenarioEditorProvider"/>
     </extensions>
 
     <actions>

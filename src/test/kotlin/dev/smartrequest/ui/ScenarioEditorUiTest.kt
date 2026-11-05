@@ -1,9 +1,6 @@
 package dev.smartrequest.ui
 
-import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.service
-import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
 import com.intellij.testFramework.EdtTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ui.UIUtil
@@ -14,22 +11,9 @@ import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.scenario.ScenarioRunState
 import dev.smartrequest.scenario.ScenarioTransport
 import dev.smartrequest.service.SmartRequestProjectService
-import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 
 class ScenarioEditorUiTest : BasePlatformTestCase() {
-
-    override fun setUp() {
-        super.setUp()
-        // The editor tabs use empty scratch files in the IDE temp directory; the test VFS only
-        // allows roots that a test registered explicitly.
-        val scenarios = Path.of(PathManager.getTempPath(), "smart-request-scenarios").toString()
-        VfsRootAccess.allowRootAccess(
-            getTestRootDisposable(),
-            scenarios,
-            scenarios.replace('\\', '/')
-        )
-    }
 
     private fun service(): SmartRequestProjectService = project.service()
 
@@ -53,30 +37,6 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         group.requests.add(request)
         service().notifyChanged()
         return request
-    }
-
-    fun testOpeningTheSameScenarioTwiceReusesOneTab() {
-        val scenario = onEdtGet { service().addScenario("Checkout") }
-        val manager = FileEditorManager.getInstance(project)
-        onEdt {
-            ScenarioEditorService.getInstance(project).open(scenario.id)
-            ScenarioEditorService.getInstance(project).open(scenario.id)
-        }
-
-        val files = manager.openFiles.filter {
-            it.getUserData(ScenarioEditorService.SCENARIO_ID) == scenario.id
-        }
-        assertEquals(1, files.size)
-        val file = files.single()
-        assertEquals(ScenarioFileType.NAME, file.fileType.name)
-        assertTrue(file.name, file.name.startsWith("Checkout"))
-        assertEquals(1, manager.getEditors(file).size)
-
-        onEdt { service().renameScenario(scenario.id, "Renamed") }
-        assertTrue(file.name, file.name.startsWith("Renamed"))
-
-        onEdt { service().removeScenario(scenario.id) }
-        assertFalse(manager.openFiles.contains(file))
     }
 
     fun testStepsCanBeAddedAndCyclesAreRejected() {

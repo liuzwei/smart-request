@@ -116,7 +116,7 @@
 
 把多个已保存的请求串成一条活动网络图（Start → 请求节点 → End），一次运行整条链路；上游响应里的值可以作为下游的 `{{变量}}`。
 
-- 右侧 `Scenarios` 工具窗口：新建、重命名、复制、删除场景；双击打开场景编辑器 Tab（同一个场景只开一个 Tab）。
+- 左侧请求树下方的 `Scenarios` 区域：新建、重命名、复制、删除、过滤、导入/导出；选中场景后在同一工具窗右侧打开编辑面板，操作方式和请求一致，不再有第二个工具窗或独立编辑器 Tab。
 - 步骤表：每行一个请求节点，按依赖顺序排列；`+ Add step` 从可搜索的请求选择器里添加；新步骤默认接在上一步后面，也可以在 `Runs after` 里改依赖，形成并行分支或汇合。
 - 顶部 `Steps | Graph` 切换两种视图。Graph 是活动网络图画布：拖动节点、从节点右侧端口拖到另一个节点左侧端口建立依赖、点击选中、Delete 删除、Ctrl+滚轮缩放、拖空白处平移、`Fit` / `Auto layout`、Ctrl+Z / Ctrl+Y 撤销重做（最多 50 步）。
 - 画布直接显示运行状态（pending / running / passed / failed / skipped）和 HTTP 状态码；点击画布节点会同步步骤表和检查器，点击运行面板的结果行也会选中画布节点。
@@ -419,7 +419,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 场景执行引擎：线性传参、fork/join 等待、并行上限、失败即停（取消在飞节点、跳过剩余节点）、`expectStatus`、出参失败不泄漏、参数 > 环境 / 出参 > 参数的优先级、请求丢失、取消、失败后结果仍完整
 - 场景的 XmlSerializer 往返：节点、连线、出参、`expectStatus`、超时、并行度、参数
 - 场景服务：新建/重命名/删除/复制（节点、边、出参 ID 全部重映射）、唯一命名、节点归属查找
-- 场景 UI：Scenarios 工具窗的增删改查与过滤、编辑器 Tab 复用/重命名/删除后关闭、步骤表与检查器（依赖勾选、环拒绝、expectStatus、出参同步）、场景参数 Tab 参与校验、运行对话框（默认参数、缺失变量、环境选择、结构错误阻止运行）、逐步骤运行面板与最终变量表
+- 场景 UI：请求工具窗内 `Scenarios` 列表的增删改查与过滤、选中场景在右侧打开/切换请求后返回、步骤表与检查器（依赖勾选、环拒绝、expectStatus、出参同步）、场景参数 Tab 参与校验、运行对话框（默认参数、缺失变量、环境选择、结构错误阻止运行）、逐步骤运行面板与最终变量表
 - 场景画布：节点/端口命中测试、真实鼠标事件从端口拖拽建边、非法边（成环、重复、Start/End）拒绝并提示、删除节点/依赖、Start/End 保护、缩放/平移/Fit、自动布局、运行状态绘制、撤销/重做
 - 场景布局：线性链路、分支/汇合分层、同层节点不重叠、结果确定性
 - 场景历史：撤销/重做恢复节点、位置、出参与依赖，最多 50 步，新编辑清空 redo，被拒绝的修改可回滚
@@ -518,8 +518,8 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 
 ### 场景编排（Scenarios）
 
-1. 点击工具栏 `Scenarios` 打开右侧场景列表，点 `New`。
-2. 在打开的编辑器里点 `+ Add step`，选择登录请求；再添加订单请求，默认接在登录之后。
+1. 在左侧请求树下方的 `Scenarios` 区域点 `+`，输入场景名后右侧会出现编辑面板。
+2. 在右侧面板里点 `+ Add step`，选择登录请求；再添加订单请求，默认接在登录之后。
 3. 选中登录步骤，在 `Captures` 里加一条 `token ← data.token`；选中订单步骤，把 URL 写成 `...?token={{token}}`。
 4. 如果接口需要租户之类的输入，在 `Parameters` Tab 里加一行默认值；运行对话框可以按次覆盖。
 5. 点 `Run`。如果 `token` 没有上游产出，运行对话框会提示缺失变量；如果它由登录步骤产出，直接运行。
@@ -613,15 +613,13 @@ src/main/kotlin/dev/smartrequest/
 │   ├── TableLayout.kt       # 表格列宽比例分配与单击编辑
 │   ├── VariableTextSupport.kt# 变量高亮与补全
 │   ├── VariableHtml.kt      # 表格变量高亮
-│   ├── ScenarioListPanel.kt # Scenarios 工具窗（新建/重命名/复制/删除/过滤）
-│   ├── ScenarioEditorPanel.kt# 场景 Tab：步骤/图形切换、检查器、运行面板、校验条
+│   ├── ScenarioListPanel.kt # 请求树下方的 Scenarios 列表（新建/重命名/复制/删除/过滤）
+│   ├── ScenarioEditorPanel.kt# 场景右侧面板：步骤/图形切换、检查器、运行/响应、校验条
 │   ├── ScenarioStepsTable.kt# 步骤表（依赖、运行状态、抓取值）
 │   ├── ScenarioGraphCanvas.kt# 活动网络图画布（拖拽、端口连线、缩放、运行状态）
-│   ├── ScenarioInspectorPanel.kt# 请求/依赖/expectStatus/超时/出参
+│   ├── ScenarioInspectorPanel.kt# 请求/依赖/expectStatus/超时/重试/出参
 │   ├── ScenarioRunPanel.kt  # 逐步骤结果与最终运行变量
 │   ├── RequestDragData.kt   # 请求树 → 画布的拖拽载荷
-│   ├── ScenarioFileType.kt  # 场景 Tab 的文件类型
-│   ├── ScenarioEditorProvider.kt # FileEditorProvider 与 Tab 复用
 │   └── dialogs/             # 环境设置、请求设置、历史、场景运行、请求选择器
 └── util/JsonPrettyPrinter.kt# 无依赖 JSON 格式化
 ```
@@ -657,9 +655,11 @@ src/main/kotlin/dev/smartrequest/
    - 运行结束在面板里列出最终变量，需要的话手动复制到环境。
    - 运行前用静态数据流校验，尽量在发出第一个请求前发现缺变量，而不是跑到一半才失败。
 
-7. **场景编辑器是编辑器 Tab，但数据仍在项目 XML 里**
-   - Tab 可以拆分、并排、重新打开，符合“看整条链路”的使用方式；场景本身仍跟随 `.idea/smart-request.xml`，不产生第二份数据。
-   - 2026.2 的平台不再提供生产可用的 `LightVirtualFile`，因此 Tab 用一个临时目录里的空 `.smart-scenario` 文件作为句柄，文件只承载 Tab，不保存内容。
+7. **场景和请求共用同一个工具窗，而不是独立工具窗/编辑器 Tab**
+   - 左侧请求树下面直接放 `Scenarios` 列表，选中场景后在同一工具窗右侧编辑；请求和场景的操作方式一致，
+     不再多一个侧边栏图标，也不用在不同窗口之间来回切。
+   - 场景数据仍跟随 `.idea/smart-request.xml`，不产生第二份数据；切到请求时场景面板保留（隐藏），再点场景即可恢复，
+     切到另一个场景时会释放上一个面板并取消它的运行。
 
 8. **画布用 Swing 自绘，不依赖 JCEF 或平台 Diagram API**
    - 图形界面可以随插件主题走，启动没有浏览器内核开销；OSS IDE 里也没有可直接复用的 Diagram API。

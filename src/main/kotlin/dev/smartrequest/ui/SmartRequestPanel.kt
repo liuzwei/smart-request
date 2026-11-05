@@ -13,6 +13,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
@@ -33,6 +34,7 @@ import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
+import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.scenario.OpenRequestListener
 import dev.smartrequest.scenario.ScenarioTopics
 import dev.smartrequest.service.SmartRequestProjectService
@@ -72,6 +74,12 @@ class SmartRequestPanel(
     private val treePanel: RequestTreePanel
     private val editorPanel: RequestEditorPanel
     private val emptyPanel: JPanel
+    private val scenarioListPanel: ScenarioListPanel
+    private val contentCards = JBPanel<JBPanel<*>>(CardLayout())
+    private val scenarioHost = JBPanel<JBPanel<*>>(BorderLayout())
+    private var scenarioPanel: ScenarioEditorPanel? = null
+    private var openScenarioId: String? = null
+    private var currentContentCard: String = CARD_REQUEST
 
     private var inFlight: CompletableFuture<HttpResponseData>? = null
     private var activeSendId: String? = null
@@ -82,6 +90,7 @@ class SmartRequestPanel(
         refreshEnvironmentCombo()
         refreshGlobals()
         editorPanel.refreshVariables()
+        closeScenarioIfDeleted()
     }
 
     init {
@@ -107,6 +116,7 @@ class SmartRequestPanel(
             variablesProvider = { VariableResolver.environmentVariables(service.activeEnvironment()) },
             onRunExtract = { runExtractionForCurrentRequest() }
         )
+        scenarioListPanel = ScenarioListPanel(project) { openScenario(it) }
         emptyPanel = buildEmptyPanel()
         editorCards.add(emptyPanel, CARD_EMPTY)
         editorCards.add(editorPanel, CARD_EDITOR)
@@ -189,9 +199,6 @@ class SmartRequestPanel(
         }
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
-            add(flatButton("Scenarios", null) { openScenariosToolWindow() }.apply {
-                toolTipText = "Chain requests into a scenario"
-            })
             add(flatButton("", AllIcons.Vcs.History) { openHistoryDialog() }.apply {
                 toolTipText = "Request history"
                 preferredSize = Dimension(JBUI.scale(30), JBUI.scale(28))
@@ -207,17 +214,27 @@ class SmartRequestPanel(
     }
 
     private fun buildSplitter(): Component {
-        val rightSplit = OnePixelSplitter(true, 0.58f).apply {
+        val requestSplit = OnePixelSplitter(true, 0.58f).apply {
             firstComponent = editorCards
             secondComponent = responsePanel
             dividerWidth = 1
         }
-        val mainSplit = OnePixelSplitter(false, 0.32f).apply {
+        contentCards.add(requestSplit, CARD_REQUEST)
+        contentCards.add(scenarioHost, CARD_SCENARIO)
+        (contentCards.layout as CardLayout).show(contentCards, CARD_REQUEST)
+
+        val leftSplit = OnePixelSplitter(true, 0.7f).apply {
             firstComponent = treePanel
-            secondComponent = rightSplit
+            secondComponent = scenarioListPanel
             dividerWidth = 1
         }
-        treePanel.minimumSize = Dimension(JBUI.scale(150), 0)
+        val mainSplit = OnePixelSplitter(false, 0.34f).apply {
+            firstComponent = leftSplit
+            secondComponent = contentCards
+            dividerWidth = 1
+        }
+        treePanel.minimumSize = Dimension(JBUI.scale(150), JBUI.scale(120))
+        scenarioListPanel.minimumSize = Dimension(JBUI.scale(150), JBUI.scale(100))
         return mainSplit
     }
 
@@ -285,6 +302,7 @@ class SmartRequestPanel(
     }
 
     private fun openRequest(request: HttpRequestConfig) {
+        showRequestCard()
         if (currentRequest?.id == request.id) return
         currentRequest = request
         editorPanel.open(request)
@@ -331,9 +349,48 @@ class SmartRequestPanel(
     }
 
     private fun showEmptyState() {
+        showRequestCard()
         currentRequest = null
         (editorCards.layout as CardLayout).show(editorCards, CARD_EMPTY)
         responsePanel.showEmptyState()
+    }
+
+    private fun showRequestCard() {
+        if (currentContentCard == CARD_REQUEST) return
+        currentContentCard = CARD_REQUEST
+        (contentCards.layout as CardLayout).show(contentCards, CARD_REQUEST)
+    }
+
+    /** Opens [scenario] in the right pane, reusing the panel when the same scenario is selected. */
+    private fun openScenario(scenario: ScenarioConfig) {
+        if (openScenarioId == scenario.id && scenarioPanel != null) {
+            showScenarioCard()
+            return
+        }
+        scenarioPanel?.let { Disposer.dispose(it) }
+        val panel = ScenarioEditorPanel(project, scenario.id)
+        scenarioPanel = panel
+        openScenarioId = scenario.id
+        scenarioHost.removeAll()
+        scenarioHost.add(panel, BorderLayout.CENTER)
+        scenarioHost.revalidate()
+        scenarioHost.repaint()
+        showScenarioCard()
+    }
+
+    private fun showScenarioCard() {
+        currentContentCard = CARD_SCENARIO
+        (contentCards.layout as CardLayout).show(contentCards, CARD_SCENARIO)
+    }
+
+    private fun closeScenarioIfDeleted() {
+        val id = openScenarioId ?: return
+        if (service.scenario(id) != null) return
+        scenarioPanel?.let { Disposer.dispose(it) }
+        scenarioPanel = null
+        openScenarioId = null
+        scenarioHost.removeAll()
+        showRequestCard()
     }
 
     private fun createRequest(groupId: String) {
@@ -478,12 +535,6 @@ class SmartRequestPanel(
             refreshGlobals()
             editorPanel.refreshVariables()
         }
-    }
-
-    private fun openScenariosToolWindow() {
-        com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
-            .getToolWindow("Scenarios")
-            ?.show()
     }
 
     private fun openGlobalSettings() {
@@ -806,7 +857,19 @@ class SmartRequestPanel(
         inFlight?.cancel(true)
         inFlight = null
         activeSendId = null
+        scenarioPanel?.let { Disposer.dispose(it) }
+        scenarioPanel = null
+        openScenarioId = null
+        scenarioListPanel.dispose()
     }
+
+    // Test hooks: inspect the embedded scenario pane without opening a window.
+
+    internal fun scenarioListForTest(): ScenarioListPanel = scenarioListPanel
+
+    internal fun scenarioPanelForTest(): ScenarioEditorPanel? = scenarioPanel
+
+    internal fun contentCardForTest(): String = currentContentCard
 
     private data class CachedResponse(
         val response: HttpResponseData?,
@@ -817,6 +880,8 @@ class SmartRequestPanel(
     companion object {
         private const val CARD_EMPTY = "empty"
         private const val CARD_EDITOR = "editor"
+        private const val CARD_REQUEST = "request"
+        private const val CARD_SCENARIO = "scenario"
         private const val SPRING_GROUP_NAME = "Spring Controllers"
         private const val HISTORY_GROUP_NAME = "History"
         private const val RESPONSE_CACHE_SIZE = 10

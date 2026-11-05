@@ -106,9 +106,10 @@ class RequestTreePanel(
             override fun mousePressed(event: MouseEvent) = maybeShowPopup(event)
             override fun mouseReleased(event: MouseEvent) = maybeShowPopup(event)
             override fun mouseClicked(event: MouseEvent) {
-                if (event.clickCount == 2 && SwingUtilities.isLeftMouseButton(event)) {
-                    selectedRequest()?.let(onSelect)
-                }
+                if (!SwingUtilities.isLeftMouseButton(event)) return
+                // A click on the already-selected request must still bring its editor back after the
+                // user looked at a scenario: the selection listener only fires when the row changes.
+                selectedRequest()?.let(onSelect)
             }
         })
         installDeleteShortcut()

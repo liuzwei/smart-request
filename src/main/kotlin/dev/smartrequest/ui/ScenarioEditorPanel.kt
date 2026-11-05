@@ -59,8 +59,9 @@ import javax.swing.JToggleButton
 import javax.swing.KeyStroke
 
 /**
- * Editor tab of one scenario: header with name/environment/run, the steps table, the selected step's
- * inspector and the run panel.
+ * Panel for one scenario, embedded in the right pane of the Smart Request tool window: header with
+ * name/environment/run, the steps table or graph canvas, the selected step's inspector and the run
+ * and response panels.
  *
  * A run edits nothing in the project: the runner works on a snapshot and captured values stay in the
  * run scope. The panel only forwards user intent; validation is always recomputed from the model.
@@ -91,12 +92,12 @@ class ScenarioEditorPanel(
     internal var testTransport: ScenarioTransport? = null
 
     private val nameField = JBTextField().apply {
-        columns = 22
+        columns = 16
         font = font.deriveFont(Font.BOLD, font.size2D + 1f)
         toolTipText = "Scenario name"
     }
     private val environmentCombo = JComboBox<EnvironmentConfig>().apply {
-        preferredSize = Dimension(JBUI.scale(140), preferredSize.height)
+        preferredSize = Dimension(JBUI.scale(120), preferredSize.height)
         maximumRowCount = 12
     }
     private val runButton = JButton("Run", AllIcons.Actions.Execute).apply {
@@ -249,7 +250,7 @@ class ScenarioEditorPanel(
     }
 
     private fun buildHeader(): JComponent {
-        val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+        val header = JBPanel<JBPanel<*>>(BorderLayout(0, 2)).apply {
             border = JBUI.Borders.empty(8, 10)
             background = UIUtil.getPanelBackground()
         }
@@ -274,8 +275,8 @@ class ScenarioEditorPanel(
             add(runButton)
             add(cancelButton)
         }
-        header.add(left, BorderLayout.WEST)
-        header.add(right, BorderLayout.EAST)
+        header.add(left, BorderLayout.NORTH)
+        header.add(right, BorderLayout.SOUTH)
         return header
     }
 
@@ -898,10 +899,6 @@ class ScenarioEditorPanel(
             .notify(project)
     }
 
-    fun preferredFocusComponent(): JComponent = nameField
-
-    fun isAlive(): Boolean = !disposed && scenario != null && service.scenario(scenarioId) != null
-
     override fun dispose() {
         if (disposed) return
         disposed = true
@@ -913,6 +910,8 @@ class ScenarioEditorPanel(
     }
 
     // Test hooks. They drive the panel the way the UI does, without dispatch events.
+
+    internal fun scenarioIdForTest(): String = scenarioId
 
     internal fun stepsTableForTest(): ScenarioStepsTable = stepsTable
 
