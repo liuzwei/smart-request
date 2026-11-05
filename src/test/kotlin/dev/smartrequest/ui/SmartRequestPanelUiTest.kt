@@ -181,7 +181,10 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals(3, scenario.nodes.size)
         val restoredLogin = scenario.nodes.single { it.kind == ScenarioNode.KIND_REQUEST }
         assertEquals("request-1", restoredLogin.requestId)
+        assertEquals(0, restoredLogin.x)
         assertEquals(40, restoredLogin.y)
+        assertEquals(-220, scenario.nodes.single { it.kind == ScenarioNode.KIND_START }.x)
+        assertEquals(220, scenario.nodes.single { it.kind == ScenarioNode.KIND_END }.x)
         assertEquals("2xx", restoredLogin.expectStatus)
         assertEquals(5_000, restoredLogin.timeoutMs)
         assertEquals("token", restoredLogin.outputs.single().variable)

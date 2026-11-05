@@ -40,7 +40,8 @@ import javax.swing.table.TableCellRenderer
  */
 class ScenarioRunPanel(
     private val requestProvider: (String) -> HttpRequestConfig?,
-    private val onCancel: () -> Unit
+    private val onCancel: () -> Unit,
+    private val onSelectNode: (String) -> Unit = {}
 ) : JBPanel<ScenarioRunPanel>(BorderLayout()) {
 
     private var scenario: ScenarioConfig? = null
@@ -106,6 +107,13 @@ class ScenarioRunPanel(
             columnModel.getColumn(STATUS_COLUMN).cellRenderer = StatusRenderer()
             columnModel.getColumn(RESULT_COLUMN).cellRenderer = ResultRenderer()
             setDefaultRenderer(String::class.java, TextRenderer())
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(event: java.awt.event.MouseEvent) {
+                    if (!javax.swing.SwingUtilities.isLeftMouseButton(event)) return
+                    val row = rowAtPoint(event.point)
+                    rows.getOrNull(row)?.let { onSelectNode(it.id) }
+                }
+            })
         }
 
         val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -453,6 +461,11 @@ class ScenarioRunPanel(
     internal fun rowCount(): Int = rows.size
 
     internal fun isCancelVisible(): Boolean = cancelButton.isVisible
+
+    /** Simulates clicking a result row; used to verify selection sync with the graph. */
+    internal fun clickNodeForTest(nodeId: String) {
+        if (rows.any { it.id == nodeId }) onSelectNode(nodeId)
+    }
 
     companion object {
         private const val CARD_EMPTY = "empty"

@@ -212,6 +212,147 @@ class ScenarioEditorUiTest : BasePlatformTestCase() {
         onEdt { panel.dispose() }
     }
 
+    fun testGraphViewSharesSelectionWithTheStepsTable() {
+        val scenario = onEdtGet { service().addScenario("Flow") }
+        val firstRequest = onEdtGet { addRequest("First") }
+        val secondRequest = onEdtGet { addRequest("Second") }
+        val panel = onEdtGet { ScenarioEditorPanel(project, scenario.id) }
+        onEdt {
+            assertTrue(panel.addStepForTest(firstRequest.id))
+            assertTrue(panel.addStepForTest(secondRequest.id))
+            panel.showGraphForTest()
+        }
+        assertTrue(panel.isGraphViewForTest())
+        val nodes = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+
+        onEdt { panel.graphCanvasForTest().selectNodeForTest(nodes[1].id) }
+        assertEquals(nodes[1].id, panel.stepsTableForTest().selectedNodeId())
+        assertEquals(nodes[1].id, panel.inspectorForTest().boundNodeId())
+
+        onEdt { panel.showStepsForTest() }
+        assertFalse(panel.isGraphViewForTest())
+        assertEquals(nodes[1].id, panel.stepsTableForTest().selectedNodeId())
+
+        onEdt {
+            panel.showGraphForTest()
+            panel.graphCanvasForTest().clearSelectionForTest()
+        }
+        assertNull(panel.stepsTableForTest().selectedNodeId())
+        assertNull(panel.inspectorForTest().boundNodeId())
+
+        onEdt { panel.dispose() }
+    }
+
+    fun testCanvasEditsAreUndoable() {
+        val scenario = onEdtGet { service().addScenario("Flow") }
+        val firstRequest = onEdtGet { addRequest("First") }
+        val secondRequest = onEdtGet { addRequest("Second") }
+        val panel = onEdtGet { ScenarioEditorPanel(project, scenario.id) }
+        onEdt {
+            panel.addStepForTest(firstRequest.id)
+            panel.addStepForTest(secondRequest.id)
+            panel.showGraphForTest()
+        }
+        val nodes = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+        val before = nodes.associate { it.id to (it.x to it.y) }
+
+        onEdt { panel.graphCanvasForTest().autoLayoutForTest() }
+        val laidOut = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+            .associate { it.id to (it.x to it.y) }
+        assertFalse(before == laidOut)
+        assertTrue(panel.canUndoForTest())
+
+        onEdt { panel.undoForTest() }
+        val restored = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+            .associate { it.id to (it.x to it.y) }
+        assertEquals(before, restored)
+        assertTrue(panel.canRedoForTest())
+
+        onEdt { panel.redoForTest() }
+        val redone = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+            .associate { it.id to (it.x to it.y) }
+        assertEquals(laidOut, redone)
+
+        onEdt { panel.dispose() }
+    }
+
+    fun testCanvasDependencyShowsUpInTheStepsTableAndCanBeUndone() {
+        val scenario = onEdtGet { service().addScenario("Flow") }
+        val firstRequest = onEdtGet { addRequest("First") }
+        val secondRequest = onEdtGet { addRequest("Second") }
+        val thirdRequest = onEdtGet { addRequest("Third") }
+        val panel = onEdtGet { ScenarioEditorPanel(project, scenario.id) }
+        onEdt {
+            panel.addStepForTest(firstRequest.id)
+            panel.addStepForTest(secondRequest.id)
+            panel.addStepForTest(thirdRequest.id)
+            panel.showGraphForTest()
+        }
+        val nodes = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+
+        onEdt { assertTrue(panel.graphCanvasForTest().connectForTest(nodes[0].id, nodes[2].id)) }
+        assertTrue(panel.stepsTableForTest().dependsTextAt(2).contains("First"))
+        assertTrue(panel.stepsTableForTest().dependsTextAt(2).contains("Second"))
+
+        onEdt { panel.undoForTest() }
+        assertFalse(panel.stepsTableForTest().dependsTextAt(2).contains("First"))
+        assertTrue(panel.stepsTableForTest().dependsTextAt(2).contains("Second"))
+
+        onEdt { panel.dispose() }
+    }
+
+    fun testRunPaintsGraphStatesAndRunPanelSelectsNodes() {
+        val scenario = onEdtGet { service().addScenario("Checkout") }
+        val login = onEdtGet {
+            addRequest(
+                "Login",
+                "POST",
+                url = "{{baseUrl}}/login",
+                extractors = listOf(ResponseExtractor(variable = "token", source = "data.token"))
+            )
+        }
+        val order = onEdtGet { addRequest("Order", "POST", url = "{{baseUrl}}/orders?token={{token}}") }
+        val panel = onEdtGet { ScenarioEditorPanel(project, scenario.id) }
+        onEdt {
+            panel.addStepForTest(login.id)
+            panel.addStepForTest(order.id)
+            panel.showGraphForTest()
+            panel.testTransport = ScenarioTransport { prepared ->
+                val body = if (prepared.url.contains("/login")) {
+                    """{"token":"abc123"}"""
+                } else {
+                    """{"ok":true}"""
+                }
+                CompletableFuture.completedFuture(
+                    HttpResponseData(
+                        statusCode = 200,
+                        statusText = "OK",
+                        headers = listOf("Content-Type" to "application/json"),
+                        body = body,
+                        bodyBytes = body.length.toLong(),
+                        durationMs = 3,
+                        contentType = "application/json",
+                        truncated = false,
+                        textual = true
+                    )
+                )
+            }
+            assertTrue(panel.startRunForTest())
+        }
+        assertTrue(waitFor { panel.lastRunForTest() != null })
+
+        val nodes = panel.scenarioForTest()!!.nodes.filter { it.isRequestNode() }
+        assertEquals(
+            dev.smartrequest.scenario.NodeRunState.PASSED,
+            panel.graphCanvasForTest().runStateForTest(nodes[0].id)
+        )
+        onEdt { panel.runPanelForTest().clickNodeForTest(nodes[1].id) }
+        assertEquals(nodes[1].id, panel.stepsTableForTest().selectedNodeId())
+        assertEquals(nodes[1].id, panel.graphCanvasForTest().selectedNodeForTest())
+
+        onEdt { panel.dispose() }
+    }
+
     fun testRunAgainstALocalServerUsesTheSharedClient() {
         val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/login") { exchange ->

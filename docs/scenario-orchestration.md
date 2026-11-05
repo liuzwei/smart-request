@@ -1,6 +1,6 @@
 # Scenario Orchestration (Scenarios) — Implementation Plan
 
-Status: P1 (model + validation + engine) and P2 (persistence, list, steps editor, run panel) implemented; P3 (canvas) next.
+Status: P1 (model + validation + engine), P2 (persistence, list, steps editor, run panel) and P3 (graph canvas, undo/redo, layout) implemented; P4 (polish) next.
 
 Confirmed decisions:
 
@@ -299,17 +299,18 @@ class ScenarioRunner(
 
 Parallel branches fork after `login` and join at `POST /orders`, which runs only after both branches passed.
 
-Interactions (deliberately small):
+Interactions (deliberately small, all implemented in P3):
 
-1. drag nodes;
-2. drag from the right port of a node to the left port of another to create an edge; self-links, duplicates, edges into START/out of END and cycles are rejected while dragging with an inline hint;
-3. click to select, Delete to remove (START/END protected), context menu for add/delete;
+1. drag nodes (snapped to 10 px, positions persisted in the model);
+2. drag from the right port of a node to the left port of another to create an edge; self-links, duplicates, edges into START/out of END and cycles are rejected while dragging with an inline hint; derived Start/End edges are drawn but cannot be selected or removed;
+3. click to select, Delete to remove a step or a request-to-request dependency (START/END protected), context menu for add/delete/auto-layout/fit;
 4. double-click a node opens its request in the Smart Request tool window (message-bus event, no direct coupling);
-5. Ctrl+wheel zoom, drag on empty space to pan, "Fit" and "Auto layout" (longest-path layering + barycenter ordering);
-6. Ctrl+Z / Ctrl+Y with snapshot-based undo (max 50 steps);
-7. run state is painted on the nodes (grey pending, blue running, green passed, red failed, dashed skipped) and the result table selects the node on click.
+5. Ctrl+wheel zoom, drag on empty space to pan, wheel pans vertically, "Fit" and "Auto layout" (longest-path layering + barycenter ordering);
+6. Ctrl+Z / Ctrl+Y with snapshot-based undo (max 50 steps); the same stack records step add/remove and dependency edits from the inspector, and a rejected edit is rolled back out of the stack;
+7. run state is painted on the nodes (grey pending, blue running, green passed, red failed, dashed skipped) with the HTTP status badge, and clicking a run-panel row selects the node in the graph and the steps table.
 
 Node width is fixed (method badge + title + captured-variable count); text is ellipsized with a tooltip. No groups, marquee selection, orthogonal routing, or minimap in v1.
+The canvas is painted in plain Swing, uses the node's `x`/`y` from the project model, and does not depend on JCEF or the platform Diagram API.
 
 ### 8.4 Run dialog
 
@@ -335,13 +336,15 @@ Shown when the scenario has parameters or when validation found variables that m
 | `http/RequestPreparer.kt` | new `variables: Map<String, String> = emptyMap()` parameter, merged over the environment variables; existing call sites unchanged |
 | `http/HttpTransport.kt` | optional shared `HttpClient` per run (`send(prepared, client)`), so 10 nodes do not pay 10 TLS handshakes; the caller owns the client |
 | `service/SmartRequestProjectService.kt` | `scenario(id)`, `addScenario`, `removeScenario`, `duplicateScenario`, `renameScenario`, `scenarioOf(nodeId)` helpers |
-| `scenario/ScenarioGraph.kt` | dependency editing, Start/End edge maintenance, cycle rejection, display order |
+| `scenario/ScenarioGraph.kt` | dependency editing, Start/End edge maintenance, cycle rejection, display order, `dependencyError` for live canvas hints |
+| `scenario/ScenarioLayout.kt` | longest-path layering + barycenter auto layout |
+| `scenario/ScenarioHistory.kt` | node/edge snapshot undo/redo (50 steps) |
 | `scenario/ScenarioValidator.kt` | pure validation (§4), including `missingVariables` for the run dialog |
 | `scenario/ScenarioRunner.kt` | scheduler, run scope, results (§5–§7) |
 | `ui/ScenarioListPanel.kt` | tool window list |
-| `ui/ScenarioEditorPanel.kt` | header, steps table, inspector, run panel, validation banner, run lifecycle |
+| `ui/ScenarioEditorPanel.kt` | header, Steps/Graph switch, inspector, run panel, validation banner, undo/redo, run lifecycle |
 | `ui/ScenarioStepsTable.kt` | P2 table view, dependency column, live run status |
-| `ui/ScenarioGraphCanvas.kt` | P3 canvas |
+| `ui/ScenarioGraphCanvas.kt` | P3 canvas: painting, hit testing, drag, ports, edges, zoom/pan, fit, auto layout, run states |
 | `ui/ScenarioInspectorPanel.kt` | request/dependencies/expect status/timeout/outputs |
 | `ui/ScenarioRunPanel.kt` | results and final variables |
 | `ui/dialogs/ScenarioRunDialog.kt` | environment + parameters + missing variables |
@@ -373,11 +376,13 @@ Engine tests need no network and no sleeping:
   next to the request/environment round-trip test.
 - `RequestPreparerTest`: run-scope precedence and unresolved reporting.
 - `ScenarioGraphTest`: append/parallel/rewire/delete, terminal maintenance, cycle rejection, display order, ancestors/descendants, grid coordinates.
+- `ScenarioLayoutTest`: linear/branch/join layering, deterministic output, no two nodes on the same spot.
+- `ScenarioHistoryTest`: undo/redo restores nodes, positions and outputs, limit, redo clearing, rejected-edit discard.
 - `ScenarioServiceTest`: create/rename/delete/duplicate (fresh node, edge and output ids), unique names, node ownership.
 - UI tests (`BasePlatformTestCase`, like the existing table tests):
-  - `ScenarioEditorUiTest`: tab reuse/rename/close, add steps, inspector dependency editing and cycle rejection, expect-status validation, output seeding, Parameters tab feeding defaults/validation, run wired to a fake transport, and an end-to-end run against a local `HttpServer`;
-  - `ScenarioStepsTableTest` is covered by the same editor test through the `stepsTableForTest()` hooks; a dedicated class can be added when the graph view starts sharing the table;
-  - `ScenarioGraphCanvasTest`: model coordinates, hit testing, edge creation by programmatic mouse events, invalid edge rejection, delete, undo/redo, auto layout bounds (P3);
+  - `ScenarioEditorUiTest`: tab reuse/rename/close, add steps, inspector dependency editing and cycle rejection, expect-status validation, output seeding, Parameters tab feeding defaults/validation, run wired to a fake transport, end-to-end run against a local `HttpServer`, Steps/Graph selection sync, canvas undo/redo, dependency edits visible in both views, graph run-state painting and run-panel selection;
+  - `ScenarioStepsTableTest` is covered by the same editor test through the `stepsTableForTest()` hooks;
+  - `ScenarioGraphCanvasUiTest`: fit/hit testing, real mouse port-to-port edge creation, invalid edge rejection, delete/START protection, zoom/pan, auto layout, run-state painting, edge hit testing;
   - `ScenarioListPanelUiTest`: create/filter/duplicate/delete, action enablement;
   - `ScenarioRunDialogUiTest`: parameter prefill, missing variables, environment selection, structural errors;
   - `ScenarioRunPanelUiTest`: live statuses, final summary, skipped rows, producer labels;
@@ -408,10 +413,11 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 
 ### P3 — canvas
 
-- [ ] Painting, drag, ports, edge creation with rejection hints, delete, zoom/pan, fit, auto layout, undo/redo.
-- [ ] Run-state painting and selection sync with the result table.
-- [ ] Graph/steps switch preserving selection.
+- [x] Painting, drag, ports, edge creation with rejection hints, delete, zoom/pan, fit, auto layout, undo/redo.
+- [x] Run-state painting and selection sync with the result table.
+- [x] Graph/steps switch preserving selection.
 - Acceptance: build the same scenario entirely on the canvas; invalid operations are refused inline; the graph survives restart with positions.
+  Covered by `ScenarioGraphCanvasUiTest` (real mouse events, geometry, invalid edges, zoom/pan/auto layout, run states) and by the XML round-trip position assertions in `SmartRequestPanelUiTest`.
 
 ### P4 — polish
 
@@ -423,7 +429,8 @@ Run: `$env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"; .\gra
 
 ## 12. Risks and later work
 
-- **Canvas interaction** is the largest unknown: keep the interaction set at the seven actions above; cover geometry (ports, hit testing, edge picking, layout) with unit tests that do not depend on rendering.
+- **Canvas interaction** was the largest unknown and is now implemented with plain Swing: geometry (ports, hit testing, edge picking, layout) is covered by deterministic tests that do not depend on rendering. The interaction set is still deliberately the seven actions above; no marquee selection, orthogonal routing or minimap in v1.
+- **Undo stack scope**: snapshots contain nodes and edges (positions, captures, dependencies), not scenario parameters or the name. A rejected dependency edit is rolled back out of the stack. The stack is in-memory per editor tab and is dropped when the tab closes.
 - **Semantics edge cases** concentrate in joins/fail-fast/cancel; model them as a table of tests, one per rule.
 - **No failure branches in v1** means error-path flows cannot be expressed as branches; `expectStatus` covers "this 404 is expected". If needed, add `EdgeCondition` later without migration.
 - **`.idea` sharing**: scenarios live next to request definitions and are not shared by default; P4 adds export/import.

@@ -238,6 +238,23 @@ object ScenarioGraph {
     fun requiresDependency(scenario: ScenarioConfig, nodeId: String, predecessorId: String): Boolean =
         predecessorId in requestPredecessors(scenario, nodeId)
 
+    /**
+     * Why the edge `from → to` cannot be added, or null when it can. Used by the canvas for live
+     * feedback while the user drags a connection; [addDependency] re-checks before mutating.
+     */
+    fun dependencyError(scenario: ScenarioConfig, fromId: String, toId: String): String? {
+        val from = node(scenario, fromId) ?: return "The source step no longer exists"
+        val to = node(scenario, toId) ?: return "The target step no longer exists"
+        if (from.id == to.id) return "A step cannot depend on itself"
+        if (from.kind == ScenarioNode.KIND_END) return "End has no outgoing dependencies"
+        if (to.kind == ScenarioNode.KIND_START) return "Start cannot have incoming dependencies"
+        if (!from.isRequestNode()) return "Start cannot be used as a dependency"
+        if (!to.isRequestNode()) return "End cannot depend on a step"
+        if (requiresDependency(scenario, toId, fromId)) return "Already a dependency"
+        if (fromId in descendants(scenario, toId)) return "Would create a cycle"
+        return null
+    }
+
     fun nextGridX(scenario: ScenarioConfig): Int {
         val rightmost = requestNodes(scenario).maxOfOrNull { it.x } ?: -ScenarioConfig.TERMINAL_SPACING
         return rightmost + ScenarioConfig.TERMINAL_SPACING

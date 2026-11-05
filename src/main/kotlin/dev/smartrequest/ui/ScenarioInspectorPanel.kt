@@ -47,7 +47,9 @@ class ScenarioInspectorPanel(
     private val variableNamesProvider: (String) -> List<String>,
     private val onChanged: () -> Unit,
     private val onStructureChanged: () -> Unit,
-    private val onMessage: (String?) -> Unit
+    private val onMessage: (String?) -> Unit,
+    private val onBeforeStructureChange: () -> Unit = {},
+    private val onStructureChangeRejected: () -> Unit = {}
 ) : JBPanel<ScenarioInspectorPanel>(CardLayout()) {
 
     private var scenario: ScenarioConfig? = null
@@ -253,6 +255,7 @@ class ScenarioInspectorPanel(
     private fun toggleDependency(otherNodeId: String, enabled: Boolean) {
         val scenario = scenario ?: return
         val current = node ?: return
+        onBeforeStructureChange()
         val result = if (enabled) {
             ScenarioGraph.addDependency(scenario, otherNodeId, current.id)
         } else {
@@ -262,6 +265,7 @@ class ScenarioInspectorPanel(
             setMessage(null)
             onStructureChanged()
         } else {
+            onStructureChangeRejected()
             setMessage(result.error, error = true)
             // Put the checkbox back: the model did not change.
             binding = true

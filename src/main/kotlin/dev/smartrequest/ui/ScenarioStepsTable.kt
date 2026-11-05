@@ -239,6 +239,22 @@ class ScenarioStepsTable(
         return rows.getOrNull(row)?.id
     }
 
+    /** Clears the row selection without rebuilding the rows; used when the graph selects an edge. */
+    fun clearSelection() {
+        binding = true
+        try {
+            table.clearSelection()
+        } finally {
+            binding = false
+        }
+        removeButton.isEnabled = false
+        onSelectionChanged(null)
+    }
+
+    internal fun focusTable() {
+        table.requestFocusInWindow()
+    }
+
     private fun removeSelected() {
         val nodeId = selectedNodeId() ?: return
         onRemoveStep(nodeId)

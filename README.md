@@ -118,12 +118,15 @@
 
 - 右侧 `Scenarios` 工具窗口：新建、重命名、复制、删除场景；双击打开场景编辑器 Tab（同一个场景只开一个 Tab）。
 - 步骤表：每行一个请求节点，按依赖顺序排列；`+ Add step` 从可搜索的请求选择器里添加；新步骤默认接在上一步后面，也可以在 `Runs after` 里改依赖，形成并行分支或汇合。
+- 顶部 `Steps | Graph` 切换两种视图。Graph 是活动网络图画布：拖动节点、从节点右侧端口拖到另一个节点左侧端口建立依赖、点击选中、Delete 删除、Ctrl+滚轮缩放、拖空白处平移、`Fit` / `Auto layout`、Ctrl+Z / Ctrl+Y 撤销重做（最多 50 步）。
+- 画布直接显示运行状态（pending / running / passed / failed / skipped）和 HTTP 状态码；点击画布节点会同步步骤表和检查器，点击运行面板的结果行也会选中画布节点。
+- 节点位置保存在项目文件里，重启 IDEA 后保持。
 - 每个步骤可以单独设置 `Expect status`（空 = 200–399，支持 `2xx`、`404`、`200-299`、`200,201`）、超时（空 = 项目默认）和出参规则（JSONPath，与 Extract 相同）；`Sync from request` 可复制请求自带的 Extract 规则。
 - 场景级参数（默认值）在 `Parameters` Tab 中维护，运行对话框里可以按次覆盖；参数同样参与变量数据流校验。
 - 运行前做静态校验：环、不可达/到不了 End、请求已删除、变量数据流（某个 `{{token}}` 没有任何上游节点产出）、并行写同名变量。顶部显示 `✓ Valid` / `N error(s)`，点击可看全部问题并跳到对应步骤。
 - `Run`：有参数或缺失变量时打开运行对话框（选择环境、填写参数/缺失变量）；运行中逐步显示状态、HTTP 状态、耗时和抓到的值；失败即停，未开始的步骤标记为 skipped。
 - 抓到的值只存在于本次运行（run scope），不会写回环境；运行结束后面板底部列出最终变量（名称、值、来源步骤），可一键复制。
-- 步骤表当前是主要视图，图形画布在后续版本加入。
+- 两种视图共享同一份场景模型，切换时会保留当前选中的步骤。
 
 ### 复制为 cURL
 
@@ -386,7 +389,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（254 个）：
+当前测试覆盖（278 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -414,6 +417,10 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 场景的 XmlSerializer 往返：节点、连线、出参、`expectStatus`、超时、并行度、参数
 - 场景服务：新建/重命名/删除/复制（节点、边、出参 ID 全部重映射）、唯一命名、节点归属查找
 - 场景 UI：Scenarios 工具窗的增删改查与过滤、编辑器 Tab 复用/重命名/删除后关闭、步骤表与检查器（依赖勾选、环拒绝、expectStatus、出参同步）、场景参数 Tab 参与校验、运行对话框（默认参数、缺失变量、环境选择、结构错误阻止运行）、逐步骤运行面板与最终变量表
+- 场景画布：节点/端口命中测试、真实鼠标事件从端口拖拽建边、非法边（成环、重复、Start/End）拒绝并提示、删除节点/依赖、Start/End 保护、缩放/平移/Fit、自动布局、运行状态绘制、撤销/重做
+- 场景布局：线性链路、分支/汇合分层、同层节点不重叠、结果确定性
+- 场景历史：撤销/重做恢复节点、位置、出参与依赖，最多 50 步，新编辑清空 redo，被拒绝的修改可回滚
+- 场景视图切换：`Steps | Graph` 保留选中节点、画布选中同步步骤表/检查器、运行面板结果行选中画布节点
 - 场景端到端：假 transport 的 UI 运行、共享 `HttpClient` 连续发请求、真实本地 HTTP Server 的登录拿 token → 下游请求使用 token
 - 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
 - 请求右键菜单 `Move to Group` 的子菜单内容与回调
@@ -509,6 +516,7 @@ http://localhost:9410/api/workshop/invitation-info/summary/1426
 5. 点 `Run`。如果 `token` 没有上游产出，运行对话框会提示缺失变量；如果它由登录步骤产出，直接运行。
 6. 运行面板逐行显示 passed/failed/skipped、HTTP 状态、耗时和抓到的值；失败时后面的步骤不会执行。
 7. 删除被引用的请求后，顶部会显示错误并阻止运行，避免跑到一半才发现。
+8. 切到 `Graph` 可以拖动节点整理布局；拖右侧端口到另一个节点的左端口会建立依赖，非法连线（成环、重复、连到 Start/End）会在拖动时直接标红并给出原因。`Ctrl+Z` 撤销画布上的拖动、连线、删除和自动布局。
 
 ### 移动请求到其他分组
 
@@ -565,7 +573,9 @@ src/main/kotlin/dev/smartrequest/
 │   └── VariableResolver.kt  # {{variable}} 递归解析
 ├── model/                   # 持久化模型（环境、请求、场景、历史）
 ├── scenario/                # 场景编排：图编辑、校验、DAG 执行
-│   ├── ScenarioGraph.kt     # 依赖编辑、Start/End 自动连线、执行顺序
+│   ├── ScenarioGraph.kt     # 依赖编辑、Start/End 自动连线、执行顺序、连线校验
+│   ├── ScenarioLayout.kt    # 分层 + barycenter 自动布局
+│   ├── ScenarioHistory.kt   # 节点/边快照的撤销/重做
 │   ├── ScenarioValidator.kt # 结构 + 变量数据流校验
 │   ├── ScenarioRunner.kt    # 失败即停的 DAG 调度与运行作用域
 │   └── StatusExpectation.kt # expectStatus 表达式
@@ -590,8 +600,9 @@ src/main/kotlin/dev/smartrequest/
 │   ├── VariableTextSupport.kt# 变量高亮与补全
 │   ├── VariableHtml.kt      # 表格变量高亮
 │   ├── ScenarioListPanel.kt # Scenarios 工具窗（新建/重命名/复制/删除/过滤）
-│   ├── ScenarioEditorPanel.kt# 场景 Tab：步骤表、检查器、运行面板、校验条
+│   ├── ScenarioEditorPanel.kt# 场景 Tab：步骤/图形切换、检查器、运行面板、校验条
 │   ├── ScenarioStepsTable.kt# 步骤表（依赖、运行状态、抓取值）
+│   ├── ScenarioGraphCanvas.kt# 活动网络图画布（拖拽、端口连线、缩放、运行状态）
 │   ├── ScenarioInspectorPanel.kt# 请求/依赖/expectStatus/超时/出参
 │   ├── ScenarioRunPanel.kt  # 逐步骤结果与最终运行变量
 │   ├── ScenarioFileType.kt  # 场景 Tab 的文件类型
@@ -635,6 +646,11 @@ src/main/kotlin/dev/smartrequest/
    - Tab 可以拆分、并排、重新打开，符合“看整条链路”的使用方式；场景本身仍跟随 `.idea/smart-request.xml`，不产生第二份数据。
    - 2026.2 的平台不再提供生产可用的 `LightVirtualFile`，因此 Tab 用一个临时目录里的空 `.smart-scenario` 文件作为句柄，文件只承载 Tab，不保存内容。
 
+8. **画布用 Swing 自绘，不依赖 JCEF 或平台 Diagram API**
+   - 图形界面可以随插件主题走，启动没有浏览器内核开销；OSS IDE 里也没有可直接复用的 Diagram API。
+   - 坐标直接存在节点模型里，随项目 XML 保存，重启后位置不变。
+   - `Ctrl+Z` / `Ctrl+Y` 用节点/边的深拷贝快照实现，最多 50 步；覆盖画布上的拖动、连线、删除、自动布局，以及步骤的增删。画布不维护第二份图，所有修改都写回同一个 `ScenarioConfig`。
+
 ---
 
 ## 7. 已知限制
@@ -650,7 +666,8 @@ src/main/kotlin/dev/smartrequest/
 - Spring 扫描只识别直接标注的注解，不识别自定义组合注解；Body 生成基于 DTO 字段和字段注解，不解析完整 Swagger/OpenAPI schema 或方法级 `@Operation` 里的 requestBody 示例。
 - 表格行不支持拖拽排序，也不支持从剪贴板批量粘贴多行 `Key: Value`。
 - URL 同步只覆盖 Query 部分；修改 URL 里的 Path `{占位符}` 会增删 Path Params 行，但反过来在表格里改不了 Path 名。
-- 场景目前是步骤表视图，图形画布、拖拽连线、撤销/重做在后续版本；不支持循环、条件分支、失败分支、重试、延迟和定时运行；运行结果只在当前 IDE 会话保留。
+- 场景画布不支持框选、正交连线、缩略图、节点分组和从请求树拖入；画布上的撤销/重做只覆盖图形结构（节点、位置、依赖），场景参数和名称不在撤销栈里。
+- 场景不支持循环、条件分支、失败分支、重试、延迟和定时运行；运行结果只在当前 IDE 会话保留。
 
 ---
 

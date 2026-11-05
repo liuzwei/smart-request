@@ -33,6 +33,13 @@
   - 运行期变量优先级为“环境 + baseUrl < 运行参数 < 上游出参”，只存在于本次运行，不写回环境；
     每次运行使用一个共享 `HttpClient`，避免逐节点重复 TLS 握手。
   - 数据流校验在发出请求前完成，删除被引用的请求会直接阻止运行并给出明确提示。
+  - 图形视图：顶部 `Steps | Graph` 切换；画布支持拖动节点、从右侧端口拖到另一个节点左侧端口建立依赖、
+    非法连线（自环、重复、成环、连到 Start/End）在拖动时标红并提示；Delete 删除步骤/依赖，Start/End 受保护；
+    Ctrl+滚轮缩放、拖空白处平移、`Fit` 与 `Auto layout`（分层 + barycenter）。
+  - 画布显示运行状态（pending/running/passed/failed/skipped）和 HTTP 状态码；点击画布节点与步骤表/检查器同步，
+    点击运行面板结果行也会选中画布节点。
+  - 撤销/重做：节点和边的深拷贝快照，最多 50 步，覆盖画布拖动、连线、删除、自动布局以及步骤增删；
+    节点坐标保存在项目文件中，重启后保持。
 - 开源协议：Apache License 2.0（`LICENSE`），并补充 `NOTICE`、`DISCLAIMER.md`、`SECURITY.md`、
   `CONTRIBUTING.md`、Issue/PR 模板。
 - 插件 zip 内置 `LICENSE`、`NOTICE`、`DISCLAIMER.md`。

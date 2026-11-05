@@ -22,6 +22,7 @@ import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.scenario.NodeRunState
 import dev.smartrequest.scenario.RunEnvironment
 import dev.smartrequest.scenario.ScenarioGraph
+import dev.smartrequest.scenario.ScenarioHistory
 import dev.smartrequest.scenario.ScenarioRunEvent
 import dev.smartrequest.scenario.ScenarioRunHandle
 import dev.smartrequest.scenario.ScenarioRunResult
@@ -32,15 +33,20 @@ import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.ui.dialogs.RequestPickerDialog
 import dev.smartrequest.ui.dialogs.ScenarioRunDialog
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.net.http.HttpClient
+import javax.swing.AbstractAction
+import javax.swing.ButtonGroup
 import javax.swing.DefaultComboBoxModel
 import javax.swing.DefaultListCellRenderer
 import javax.swing.JButton
@@ -49,6 +55,8 @@ import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTabbedPane
+import javax.swing.JToggleButton
+import javax.swing.KeyStroke
 
 /**
  * Editor tab of one scenario: header with name/environment/run, the steps table, the selected step's
@@ -72,6 +80,12 @@ class ScenarioEditorPanel(
     private var runClient: HttpClient? = null
     private var lastRun: ScenarioRunResult? = null
     private var validationReport = ScenarioValidator.Report()
+
+    private val history = ScenarioHistory()
+    private var currentNodeId: String? = null
+    private var syncingSelection = false
+    private var showingGraph = false
+    private var graphEverShown = false
 
     /** Test seam: when set, a run sends through this transport instead of real HTTP. */
     internal var testTransport: ScenarioTransport? = null
@@ -99,7 +113,7 @@ class ScenarioEditorPanel(
 
     private val stepsTable = ScenarioStepsTable(
         requestProvider = service::findRequest,
-        onSelectionChanged = { nodeId -> showNode(nodeId) },
+        onSelectionChanged = { nodeId -> onStepsSelection(nodeId) },
         onAddStep = { addStep() },
         onRemoveStep = { removeStep(it) },
         onOpenRequest = { openRequest(it) }
@@ -109,12 +123,59 @@ class ScenarioEditorPanel(
         variableNamesProvider = { nodeId -> captureSuggestions(nodeId) },
         onChanged = { modelChanged() },
         onStructureChanged = { structureChanged() },
-        onMessage = { /* the inspector shows its own message label */ }
+        onMessage = { /* the inspector shows its own message label */ },
+        onBeforeStructureChange = { recordHistory() },
+        onStructureChangeRejected = { discardLastHistory() }
     )
     private val runPanel = ScenarioRunPanel(
         requestProvider = service::findRequest,
-        onCancel = { cancelRun() }
+        onCancel = { cancelRun() },
+        onSelectNode = { nodeId -> selectFromRunPanel(nodeId) }
     )
+
+    private val stepsToggle = JToggleButton("Steps", true).apply {
+        isFocusPainted = false
+        margin = JBUI.insets(2, 10)
+        toolTipText = "Edit the flow as a table"
+    }
+    private val graphToggle = JToggleButton("Graph", false).apply {
+        isFocusPainted = false
+        margin = JBUI.insets(2, 10)
+        toolTipText = "Edit the flow on a canvas"
+    }
+    private val viewCards = JPanel(CardLayout())
+    private val graphHint = JBLabel(GRAPH_HINT_SHORT).apply {
+        foreground = UIUtil.getContextHelpForeground()
+        toolTipText = GRAPH_HINT
+        border = JBUI.Borders.empty(2, 6)
+    }
+    private val undoButton = JButton(AllIcons.Actions.Undo).apply {
+        toolTipText = "Undo (Ctrl+Z)"
+        isFocusPainted = false
+    }
+    private val redoButton = JButton(AllIcons.Actions.Redo).apply {
+        toolTipText = "Redo (Ctrl+Y)"
+        isFocusPainted = false
+    }
+    private val autoLayoutButton = JButton("Auto layout", AllIcons.Actions.Refresh).apply {
+        toolTipText = "Lay the flow out from left to right"
+        isFocusPainted = false
+    }
+    private val fitButton = JButton("Fit", null).apply {
+        toolTipText = "Fit the whole flow into the view"
+        isFocusPainted = false
+    }
+    private val graphCanvas = ScenarioGraphCanvas(
+        scenarioProvider = { scenario },
+        requestProvider = service::findRequest,
+        onSelectionChanged = { nodeId, edgeId -> onCanvasSelection(nodeId, edgeId) },
+        onOpenRequest = { openRequest(it) },
+        onAddStep = { addStep() },
+        onBeforeEdit = { recordHistory() },
+        onGraphChanged = { structureChanged() },
+        onHint = { message -> updateGraphHint(message) }
+    )
+
     private val parametersPanel = KeyValueTablePanel(
         onChanged = { modelChanged() },
         showLegend = false,
@@ -134,7 +195,9 @@ class ScenarioEditorPanel(
                 syncHeader()
                 stepsTable.refreshNames()
                 inspector.refreshRequestChoices()
+                graphCanvas.refresh()
                 refreshValidation(validateScenario())
+                updateGraphButtons()
             }
         }
     }
@@ -151,6 +214,23 @@ class ScenarioEditorPanel(
         }
         runButton.addActionListener { runScenario() }
         cancelButton.addActionListener { cancelRun() }
+        ButtonGroup().apply {
+            add(stepsToggle)
+            add(graphToggle)
+        }
+        stepsToggle.addActionListener {
+            if (!stepsToggle.isSelected) return@addActionListener
+            showView(graph = false)
+        }
+        graphToggle.addActionListener {
+            if (!graphToggle.isSelected) return@addActionListener
+            showView(graph = true)
+        }
+        undoButton.addActionListener { undo() }
+        redoButton.addActionListener { redo() }
+        autoLayoutButton.addActionListener { graphCanvas.autoLayout() }
+        fitButton.addActionListener { graphCanvas.fitToContent() }
+        installUndoShortcuts()
         validationLabel.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(event: MouseEvent) {
                 if (event.button == MouseEvent.BUTTON1) showValidationPopup()
@@ -162,6 +242,7 @@ class ScenarioEditorPanel(
         stepsTable.bind(scenario)
         scenario?.let { parametersPanel.bind(it.parameters) }
         refreshValidation(validateScenario())
+        updateGraphButtons()
     }
 
     private fun buildHeader(): JComponent {
@@ -175,6 +256,14 @@ class ScenarioEditorPanel(
             add(nameField)
             add(JBLabel("Env").apply { font = font.deriveFont(Font.BOLD) })
             add(environmentCombo)
+            add(
+                JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false
+                    border = JBUI.Borders.emptyLeft(10)
+                    add(stepsToggle)
+                    add(graphToggle)
+                }
+            )
         }
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
             isOpaque = false
@@ -188,13 +277,31 @@ class ScenarioEditorPanel(
     }
 
     private fun buildBody(): JComponent {
+        viewCards.add(stepsTable, CARD_STEPS)
+        viewCards.add(buildGraphCard(), CARD_GRAPH)
         val split = OnePixelSplitter(true, 0.6f).apply {
-            firstComponent = stepsTable
+            firstComponent = viewCards
             secondComponent = bottomTabs
             dividerWidth = 1
         }
         stepsTable.minimumSize = Dimension(JBUI.scale(200), JBUI.scale(140))
+        graphCanvas.minimumSize = Dimension(JBUI.scale(200), JBUI.scale(160))
         return split
+    }
+
+    private fun buildGraphCard(): JComponent = JBPanel<JBPanel<*>>(BorderLayout(0, 4)).apply {
+        isOpaque = false
+        border = JBUI.Borders.empty(4, 6)
+        val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            add(autoLayoutButton)
+            add(fitButton)
+            add(undoButton)
+            add(redoButton)
+        }
+        add(toolbar, BorderLayout.NORTH)
+        add(graphCanvas, BorderLayout.CENTER)
+        add(graphHint, BorderLayout.SOUTH)
     }
 
     private fun wrapParametersPanel(): JComponent = JBPanel<JBPanel<*>>(BorderLayout(0, 4)).apply {
@@ -264,10 +371,156 @@ class ScenarioEditorPanel(
         updateRunButtons()
     }
 
-    private fun showNode(nodeId: String?) {
+    private fun showNode(nodeId: String?, switchTab: Boolean = true) {
+        currentNodeId = nodeId
         if (disposed) return
         inspector.bind(scenario, nodeId)
-        if (nodeId != null) bottomTabs.selectedIndex = 0
+        if (nodeId != null && switchTab) bottomTabs.selectedIndex = 0
+    }
+
+    private fun onStepsSelection(nodeId: String?) {
+        if (syncingSelection || disposed) return
+        showNode(nodeId)
+        graphCanvas.selectNodeSilently(nodeId)
+        updateGraphHint(null)
+    }
+
+    private fun onCanvasSelection(nodeId: String?, edgeId: String?) {
+        if (syncingSelection || disposed) return
+        selectFromEverywhere(
+            nodeId = nodeId,
+            skipCanvas = true,
+            switchTab = nodeId != null
+        )
+        when {
+            edgeId != null -> updateGraphHint("Dependency selected. Press Delete to remove it.")
+            nodeId != null -> updateGraphHint(null)
+            else -> updateGraphHint(null)
+        }
+    }
+
+    private fun selectFromRunPanel(nodeId: String) {
+        if (syncingSelection || disposed) return
+        selectFromEverywhere(nodeId, switchTab = false)
+        updateGraphHint(null)
+    }
+
+    private fun selectFromEverywhere(
+        nodeId: String?,
+        skipSteps: Boolean = false,
+        skipCanvas: Boolean = false,
+        switchTab: Boolean = true
+    ) {
+        showNode(nodeId, switchTab)
+        syncingSelection = true
+        try {
+            if (!skipSteps) {
+                if (nodeId != null) {
+                    stepsTable.selectNode(nodeId)
+                } else {
+                    stepsTable.clearSelection()
+                }
+            }
+            if (!skipCanvas) {
+                graphCanvas.selectNodeSilently(nodeId)
+            }
+        } finally {
+            syncingSelection = false
+        }
+    }
+
+    private fun showView(graph: Boolean) {
+        if (disposed) return
+        showingGraph = graph
+        (viewCards.layout as CardLayout).show(viewCards, if (graph) CARD_GRAPH else CARD_STEPS)
+        stepsToggle.isSelected = !graph
+        graphToggle.isSelected = graph
+        if (graph) {
+            if (!graphEverShown) {
+                graphEverShown = true
+                graphCanvas.fitToContent()
+            }
+            graphCanvas.selectNodeSilently(currentNodeId)
+            graphCanvas.refresh()
+        } else {
+            val nodeId = currentNodeId
+            if (nodeId != null) {
+                stepsTable.selectNode(nodeId)
+            } else {
+                stepsTable.clearSelection()
+            }
+            stepsTable.focusTable()
+        }
+        updateGraphButtons()
+    }
+
+    private fun updateGraphHint(message: String?) {
+        graphHint.text = message ?: GRAPH_HINT_SHORT
+        graphHint.foreground = UIUtil.getContextHelpForeground()
+        graphHint.toolTipText = GRAPH_HINT
+    }
+
+    private fun updateGraphButtons() {
+        undoButton.isEnabled = history.canUndo
+        redoButton.isEnabled = history.canRedo
+        autoLayoutButton.isEnabled = scenario?.nodes?.isNotEmpty() == true
+        fitButton.isEnabled = scenario?.nodes?.isNotEmpty() == true
+    }
+
+    private fun recordHistory() {
+        scenario?.let { history.record(it) }
+        updateGraphButtons()
+    }
+
+    private fun discardLastHistory() {
+        history.discardLast()
+        updateGraphButtons()
+    }
+
+    private fun undo() {
+        val current = scenario ?: return
+        if (!history.undo(current)) return
+        afterHistoryChange("Undo")
+    }
+
+    private fun redo() {
+        val current = scenario ?: return
+        if (!history.redo(current)) return
+        afterHistoryChange("Redo")
+    }
+
+    private fun afterHistoryChange(message: String) {
+        notifyChanged()
+        stepsTable.bind(scenario, keepRunState = activeRun != null)
+        graphCanvas.refresh()
+        graphCanvas.selectNodeSilently(currentNodeId)
+        refreshValidation(validateScenario())
+        updateGraphButtons()
+        updateGraphHint(message)
+    }
+
+    private fun installUndoShortcuts() {
+        getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
+            KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK),
+            "scenarioUndo"
+        )
+        actionMap.put("scenarioUndo", object : AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent?) = undo()
+        })
+        getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
+            KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK or InputEvent.SHIFT_DOWN_MASK),
+            "scenarioRedo"
+        )
+        actionMap.put("scenarioRedo", object : AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent?) = redo()
+        })
+        getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
+            KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK),
+            "scenarioRedoKey"
+        )
+        actionMap.put("scenarioRedoKey", object : AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent?) = redo()
+        })
     }
 
     private fun addStep() {
@@ -285,6 +538,7 @@ class ScenarioEditorPanel(
 
     private fun addRequestNode(request: HttpRequestConfig) {
         val current = scenario ?: return
+        recordHistory()
         val node = ScenarioGraph.addRequestNode(
             scenario = current,
             requestId = request.id,
@@ -299,6 +553,8 @@ class ScenarioEditorPanel(
 
     private fun removeStep(nodeId: String) {
         val current = scenario ?: return
+        if (ScenarioGraph.node(current, nodeId)?.isRequestNode() != true) return
+        recordHistory()
         if (!ScenarioGraph.removeNode(current, nodeId)) return
         structureChanged()
     }
@@ -330,13 +586,17 @@ class ScenarioEditorPanel(
     private fun modelChanged() {
         notifyChanged()
         stepsTable.refreshNames()
+        graphCanvas.refresh()
         refreshValidation(validateScenario())
+        updateGraphButtons()
     }
 
     private fun structureChanged() {
         notifyChanged()
         stepsTable.bind(scenario, keepRunState = activeRun != null)
+        graphCanvas.refresh()
         refreshValidation(validateScenario())
+        updateGraphButtons()
     }
 
     private fun notifyChanged() {
@@ -519,6 +779,7 @@ class ScenarioEditorPanel(
 
         lastRun = null
         stepsTable.clearResults()
+        graphCanvas.startRun(current)
         runPanel.startRun(current)
         bottomTabs.selectedIndex = 2
         val handle = try {
@@ -528,6 +789,7 @@ class ScenarioEditorPanel(
             runClient = null
             runPanel.reset()
             stepsTable.clearResults()
+            graphCanvas.clearRunState()
             bottomTabs.selectedIndex = 0
             notifyUser(
                 "The scenario could not start: ${e.message ?: e.javaClass.simpleName}",
@@ -549,11 +811,13 @@ class ScenarioEditorPanel(
             is ScenarioRunEvent.NodeStarted -> {
                 stepsTable.setNodeState(event.nodeId, NodeRunState.RUNNING)
                 runPanel.setNodeState(event.nodeId, NodeRunState.RUNNING)
+                graphCanvas.setRunState(event.nodeId, NodeRunState.RUNNING)
             }
 
             is ScenarioRunEvent.NodeFinished -> {
                 stepsTable.updateNodeResult(event.result)
                 runPanel.updateNode(event.result)
+                graphCanvas.setRunResult(event.result)
             }
 
             is ScenarioRunEvent.RunFinished -> finishRun(event.result)
@@ -565,6 +829,7 @@ class ScenarioEditorPanel(
         activeRun = null
         stepsTable.setResults(result.nodes)
         runPanel.finish(result)
+        graphCanvas.setRunResults(result.nodes)
         val client = runClient
         runClient = null
         if (client != null) {
@@ -617,6 +882,32 @@ class ScenarioEditorPanel(
 
     internal fun runPanelForTest(): ScenarioRunPanel = runPanel
 
+    internal fun graphCanvasForTest(): ScenarioGraphCanvas = graphCanvas
+
+    internal fun showGraphForTest() {
+        showView(graph = true)
+    }
+
+    internal fun showStepsForTest() {
+        showView(graph = false)
+    }
+
+    internal fun isGraphViewForTest(): Boolean = showingGraph
+
+    internal fun graphHintForTest(): String = graphHint.text
+
+    internal fun undoForTest() {
+        undo()
+    }
+
+    internal fun redoForTest() {
+        redo()
+    }
+
+    internal fun canUndoForTest(): Boolean = history.canUndo
+
+    internal fun canRedoForTest(): Boolean = history.canRedo
+
     internal fun parametersPanelForTest(): KeyValueTablePanel = parametersPanel
 
     internal fun validationTextForTest(): String = validationLabel.text
@@ -657,6 +948,13 @@ class ScenarioEditorPanel(
     internal fun scenarioForTest(): ScenarioConfig? = scenario
 
     companion object {
+        private const val CARD_STEPS = "steps"
+        private const val CARD_GRAPH = "graph"
+        private const val GRAPH_HINT =
+            "Drag nodes · drag a right port to a left port to connect · Ctrl+wheel zoom · drag empty space to pan · Delete removes the selection"
+        private const val GRAPH_HINT_SHORT =
+            "Drag nodes · connect ports · Ctrl+wheel zoom · Delete removes"
+
         private val VALIDATION_OK = com.intellij.ui.JBColor(0x1A7F37, 0x73BD79)
         private val VALIDATION_WARNING = com.intellij.ui.JBColor(0xA15C00, 0xD6A26A)
         private val VALIDATION_ERROR = com.intellij.ui.JBColor(0xC7222D, 0xFF6B68)
