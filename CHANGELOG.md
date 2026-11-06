@@ -9,7 +9,7 @@
 
 - 新增 `release-2024.3` 兼容分支：`intellijIdea("2024.3.6")`、`since-build=243`、JVM target 21、
   Kotlin stdlib API 2.0；`main` 分支继续面向 IntelliJ IDEA 2026.2+ / JVM 25。
-  分支版本号为 `1.1.0-2024.3`，低于 `main` 的 `1.1.0`，避免在同时兼容的新 IDE 上覆盖主版本。
+  分支版本号为 `1.2.0-2024.3`，低于 `main` 的 `1.2.0`，避免在同时兼容的新 IDE 上覆盖主版本。
 
 ### Added
 

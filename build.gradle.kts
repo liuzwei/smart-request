@@ -9,8 +9,8 @@ plugins {
 }
 
 group = "dev.smartrequest"
-// Pre-release suffix keeps this compatibility line below main's 1.1.0 on IDEs where both can install.
-version = "1.1.0-2024.3"
+// Pre-release suffix keeps this compatibility line below main's 1.2.0 on IDEs where both can install.
+version = "1.2.0-2024.3"
 
 repositories {
     mavenCentral()
