@@ -189,6 +189,10 @@
   `prod` 带另一套租户头，切换环境时自动生效。
 - 全局 Header 适合放 `Authorization`、`Token`、`X-Tenant-Code` 等。
 - 全局 Param 会追加到每个请求的 URL 查询参数中。
+- 每个请求的 `Params` / `Headers` 页签右上角有 `Use global params` / `Use global headers`，默认勾选。
+  登录这类请求可以取消勾选：发送时既不合并、也不解析对应的全局项，因此全局 `Authorization: Bearer {{token}}`
+  不会在登录接口上因为 token 还没生成而报错；等登录响应把 token 写入环境后，其他请求继续默认使用。
+- 取消勾选时全局行隐藏，重新勾选即可恢复；这个选择保存在请求上，复制请求、场景运行和场景 JSON 导出都会保留。
 - 在请求编辑器的 Params / Headers 表格里，当前环境的全局行以灰色斜体显示、不可编辑、不可删除。
 - 同名时请求级参数优先：
   - 请求 Header `Authorization` 覆盖全局 `Authorization`。

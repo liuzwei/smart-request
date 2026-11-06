@@ -200,7 +200,15 @@ class HttpRequestConfig(
     var bodyType: String = BodyType.NONE.name,
     var body: String = "",
     var springKey: String? = null,
-    var extractors: MutableList<ResponseExtractor> = mutableListOf()
+    var extractors: MutableList<ResponseExtractor> = mutableListOf(),
+    /**
+     * Merge the active environment's global headers into this request. Login requests usually turn
+     * this off: they run before their own response has produced the token that the global
+     * `Authorization` header references.
+     */
+    var useGlobalHeaders: Boolean = true,
+    /** Merge the active environment's global query parameters into this request. */
+    var useGlobalParams: Boolean = true
 ) {
     fun normalize() {
         method = method.uppercase().takeIf { it in HTTP_METHODS } ?: "GET"
@@ -223,6 +231,8 @@ class HttpRequestConfig(
         copy.body = body
         copy.springKey = springKey
         copy.extractors = extractors.map { it.deepCopy() }.toMutableList()
+        copy.useGlobalHeaders = useGlobalHeaders
+        copy.useGlobalParams = useGlobalParams
     }
 
     companion object {

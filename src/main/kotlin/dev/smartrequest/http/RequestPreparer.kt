@@ -50,7 +50,10 @@ object RequestPreparer {
         val warnings = LinkedHashSet<String>()
         val errors = ArrayList<String>()
 
-        val mergedParams = mergeParameters(request.params, globalParams)
+        val mergedParams = mergeParameters(
+            request.params,
+            if (request.useGlobalParams) globalParams else emptyList()
+        )
         val urlResult = RequestUrlBuilder.build(
             request.url,
             mergedParams,
@@ -61,7 +64,10 @@ object RequestPreparer {
         warnings += urlResult.unresolved
         errors += urlResult.errors
 
-        val mergedHeaders = mergeHeaders(request.headers, globalHeaders)
+        val mergedHeaders = mergeHeaders(
+            request.headers,
+            if (request.useGlobalHeaders) globalHeaders else emptyList()
+        )
         val finalHeaders = LinkedHashMap<String, String>()
         for ((key, value) in mergedHeaders) {
             val resolvedKey = TemplateEngine.resolve(key, resolvedVariables, registry)

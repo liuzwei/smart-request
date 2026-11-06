@@ -149,6 +149,7 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
             environments.first().globalParams.add(KeyValue.of("tenant", "acme"))
             groups.first().requests.first().headers.add(KeyValue.of("X-Test", "yes"))
             groups.first().requests.first().pathParams.add(KeyValue.of("id", "42"))
+            groups.first().requests.first().useGlobalHeaders = false
             groups.first().requests.first().extractors.add(
                 ResponseExtractor(variable = "token", source = "data.token")
             )
@@ -183,6 +184,8 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals("tenant", restoredEnvironment.globalParams.first().key)
         assertEquals("X-Test", restored.groups.first().requests.first().headers.first().key)
         assertEquals("42", restored.groups.first().requests.first().pathParams.first().value)
+        assertEquals(false, restored.groups.first().requests.first().useGlobalHeaders)
+        assertEquals(true, restored.groups.first().requests.first().useGlobalParams)
         val restoredExtractor = restored.groups.first().requests.first().extractors.first()
         assertEquals("token", restoredExtractor.variable)
         assertEquals("data.token", restoredExtractor.source)

@@ -27,6 +27,7 @@ import java.awt.event.KeyEvent
 import javax.swing.AbstractAction
 import javax.swing.BorderFactory
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -76,6 +77,21 @@ class RequestEditorPanel(
         "{{baseUrl}} vars · globals locked · Ctrl+Enter"
     ).apply {
         foreground = UIUtil.getContextHelpForeground()
+    }
+
+    private val paramsHint = JBLabel("Request params override globals.").apply {
+        foreground = UIUtil.getContextHelpForeground()
+    }
+    private val headersHint = JBLabel("Request headers override globals.").apply {
+        foreground = UIUtil.getContextHelpForeground()
+    }
+    private val useGlobalParamsCheck = JCheckBox("Use global params", true).apply {
+        toolTipText = "Send the active environment's global query params with this request. " +
+                "Uncheck it for requests that run before the globals' variables exist, such as login."
+    }
+    private val useGlobalHeadersCheck = JCheckBox("Use global headers", true).apply {
+        toolTipText = "Send the active environment's global headers with this request. " +
+                "Uncheck it for requests that run before the globals' variables exist, such as login."
     }
 
     private val pathPanel = PathParameterPanel(variablesProvider, onChanged = { updateTabTitles() })
@@ -230,9 +246,9 @@ class RequestEditorPanel(
     }
 
     private fun buildTabs(): JComponent {
-        tabs.addTab("Params", wrapTable("Request params override globals.", paramsPanel))
+        tabs.addTab("Params", tableTab(paramsHint, paramsPanel, useGlobalParamsCheck))
         tabs.addTab("Path Params", pathPanel)
-        tabs.addTab("Headers", wrapTable("Request headers override globals.", headersPanel))
+        tabs.addTab("Headers", tableTab(headersHint, headersPanel, useGlobalHeadersCheck))
         tabs.addTab("Body", buildBodyPanel())
         tabs.addTab("Extract (0)", buildExtractPanel())
         return tabs
@@ -243,10 +259,18 @@ class RequestEditorPanel(
         add(extractorsPanel, BorderLayout.CENTER)
     }
 
-    private fun wrapTable(text: String, table: KeyValueTablePanel): JComponent {
+    private fun tableTab(
+        hint: JBLabel,
+        table: KeyValueTablePanel,
+        useGlobals: JCheckBox
+    ): JComponent {
         val panel = JBPanel<JBPanel<*>>(BorderLayout(0, 4)).apply {
             border = JBUI.Borders.empty(8, 6)
-            add(JBLabel(text).apply { foreground = UIUtil.getContextHelpForeground() }, BorderLayout.NORTH)
+            add(JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                isOpaque = false
+                add(hint, BorderLayout.WEST)
+                add(useGlobals, BorderLayout.EAST)
+            }, BorderLayout.NORTH)
             add(table, BorderLayout.CENTER)
         }
         return panel
@@ -313,6 +337,22 @@ class RequestEditorPanel(
             val request = current ?: return@simpleListener
             if (!binding) request.body = bodyArea.text
         })
+        useGlobalParamsCheck.addActionListener {
+            if (binding) return@addActionListener
+            val request = current ?: return@addActionListener
+            request.useGlobalParams = useGlobalParamsCheck.isSelected
+            paramsPanel.refreshFixed(effectiveGlobalParams(request))
+            updateGlobalHints()
+            updateTabTitles()
+        }
+        useGlobalHeadersCheck.addActionListener {
+            if (binding) return@addActionListener
+            val request = current ?: return@addActionListener
+            request.useGlobalHeaders = useGlobalHeadersCheck.isSelected
+            headersPanel.refreshFixed(effectiveGlobalHeaders(request))
+            updateGlobalHints()
+            updateTabTitles()
+        }
     }
 
     private fun installSendShortcut() {
@@ -341,9 +381,11 @@ class RequestEditorPanel(
             nameField.text = request.name
             methodCombo.selectedItem = request.method
             urlField.text = request.url
+            useGlobalParamsCheck.isSelected = request.useGlobalParams
+            useGlobalHeadersCheck.isSelected = request.useGlobalHeaders
             pathPanel.bind(request)
-            paramsPanel.bind(request.params, globalParams.filter { it.enabled })
-            headersPanel.bind(request.headers, globalHeaders.filter { it.enabled })
+            paramsPanel.bind(request.params, effectiveGlobalParams(request))
+            headersPanel.bind(request.headers, effectiveGlobalHeaders(request))
             extractorsPanel.bind(request.extractors)
             val type = request.bodyTypeEnum()
             bodyTypeCombo.selectedIndex = BodyType.entries.indexOf(type)
@@ -361,6 +403,7 @@ class RequestEditorPanel(
             binding = false
         }
         setEditorEnabled(true)
+        updateGlobalHints()
         updateTabTitles()
         urlField.caretPosition = 0
     }
@@ -368,13 +411,42 @@ class RequestEditorPanel(
     fun setGlobals(headers: List<KeyValue>, params: List<KeyValue>) {
         globalHeaders = headers
         globalParams = params
-        headersPanel.refreshFixed(headers.filter { it.enabled })
-        paramsPanel.refreshFixed(params.filter { it.enabled })
+        refreshGlobalRows()
+        updateGlobalHints()
         updateTabTitles()
     }
 
     fun selectTab(index: Int) {
         if (index in 0 until tabs.tabCount) tabs.selectedIndex = index
+    }
+
+    private fun effectiveGlobalParams(request: HttpRequestConfig): List<KeyValue> =
+        if (request.useGlobalParams) globalParams.filter { it.enabled } else emptyList()
+
+    private fun effectiveGlobalHeaders(request: HttpRequestConfig): List<KeyValue> =
+        if (request.useGlobalHeaders) globalHeaders.filter { it.enabled } else emptyList()
+
+    /** Re-reads the fixed rows after the environment globals changed. */
+    private fun refreshGlobalRows() {
+        val request = current ?: return
+        paramsPanel.refreshFixed(effectiveGlobalParams(request))
+        headersPanel.refreshFixed(effectiveGlobalHeaders(request))
+    }
+
+    private fun updateGlobalHints() {
+        val request = current
+        val paramsOn = request?.useGlobalParams ?: true
+        val headersOn = request?.useGlobalHeaders ?: true
+        paramsHint.text = if (paramsOn) {
+            "Request params override globals."
+        } else {
+            "Global params are disabled for this request."
+        }
+        headersHint.text = if (headersOn) {
+            "Request headers override globals."
+        } else {
+            "Global headers are disabled for this request."
+        }
     }
 
     fun refreshVariables() {
@@ -423,6 +495,8 @@ class RequestEditorPanel(
     fun updateGlobalCounts(headers: List<KeyValue>, params: List<KeyValue>) {
         globalHeaders = headers
         globalParams = params
+        refreshGlobalRows()
+        updateGlobalHints()
         updateTabTitles()
     }
 
@@ -438,6 +512,12 @@ class RequestEditorPanel(
         current?.params?.map { it.key to it.value }.orEmpty()
 
     internal fun paramsTable(): KeyValueTablePanel = paramsPanel
+
+    internal fun headersTable(): KeyValueTablePanel = headersPanel
+
+    internal fun useGlobalParamsCheckbox(): JCheckBox = useGlobalParamsCheck
+
+    internal fun useGlobalHeadersCheckbox(): JCheckBox = useGlobalHeadersCheck
 
     internal fun pathParameterCount(): Int = pathPanel.count()
 
@@ -456,6 +536,8 @@ class RequestEditorPanel(
         urlField.isEnabled = enabled
         sendButton.isEnabled = enabled
         tabs.isEnabled = enabled
+        useGlobalParamsCheck.isEnabled = enabled
+        useGlobalHeadersCheck.isEnabled = enabled
         extractorsPanel.setEnabledState(enabled)
         bodyArea.isEnabled = enabled && current?.bodyTypeEnum() != BodyType.NONE
         if (!enabled) {

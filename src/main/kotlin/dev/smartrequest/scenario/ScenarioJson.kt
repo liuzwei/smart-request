@@ -157,7 +157,9 @@ object ScenarioJson {
                 "pathParams" to request.pathParams.map(::keyValueMap),
                 "bodyType" to request.bodyType,
                 "body" to request.body,
-                "extractors" to request.extractors.map(::outputMap)
+                "extractors" to request.extractors.map(::outputMap),
+                "useGlobalHeaders" to request.useGlobalHeaders,
+                "useGlobalParams" to request.useGlobalParams
             )
         )
     }
@@ -201,7 +203,9 @@ object ScenarioJson {
                 body = request.string("body", ""),
                 extractors = request.arrayOrEmpty("extractors").mapIndexed { i, item ->
                     decodeOutput(item, "requests[$index].extractors[$i]")
-                }.toMutableList()
+                }.toMutableList(),
+                useGlobalHeaders = request.bool("useGlobalHeaders", true),
+                useGlobalParams = request.bool("useGlobalParams", true)
             ).apply { normalize() }
         )
     }

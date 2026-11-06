@@ -45,6 +45,53 @@ class RequestPreparerTest {
     }
 
     @Test
+    fun `global headers are skipped when the request opts out`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/login"
+            useGlobalHeaders = false
+        }
+        // The token does not exist yet: a login request must be able to run before the capture that
+        // creates it, so the skipped global header must not be resolved at all.
+        val globals = listOf(
+            KeyValue.of("Authorization", "Bearer {{capturedToken}}"),
+            KeyValue.of("X-Tenant", "acme")
+        )
+
+        val prepared = RequestPreparer.prepare(request, environment, globals, emptyList(), 30_000, true)
+
+        assertNull(header(prepared.request.headers, "Authorization"))
+        assertNull(header(prepared.request.headers, "X-Tenant"))
+    }
+
+    @Test
+    fun `global params are skipped when the request opts out`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/login"
+            useGlobalParams = false
+        }
+        // Unresolved on purpose: the request must not even try to evaluate skipped global params.
+        val globals = listOf(KeyValue.of("tenant", "{{tenantCode}}"))
+
+        val prepared = RequestPreparer.prepare(request, environment, emptyList(), globals, 30_000, true)
+
+        assertEquals("http://localhost:8080/login", prepared.request.url)
+    }
+
+    @Test
+    fun `global headers and params are used by default`() {
+        val request = HttpRequestConfig().apply {
+            url = "{{baseUrl}}/users"
+        }
+        val globals = listOf(KeyValue.of("X-Tenant", "acme"))
+        val globalParams = listOf(KeyValue.of("tenant", "acme"))
+
+        val prepared = RequestPreparer.prepare(request, environment, globals, globalParams, 30_000, true)
+
+        assertEquals("acme", header(prepared.request.headers, "X-Tenant"))
+        assertEquals("http://localhost:8080/users?tenant=acme", prepared.request.url)
+    }
+
+    @Test
     fun `path parameters are applied to the final url`() {
         val request = HttpRequestConfig().apply {
             url = "{{baseUrl}}/users/{id}"

@@ -7,6 +7,10 @@
 
 ### Added
 
+- 全局 Header / 全局 Params 支持**按请求关闭**：`Params` / `Headers` 页签右上角新增 `Use global params` /
+  `Use global headers`，默认勾选。登录等尚未生成 `{{token}}` 的请求可以取消勾选，发送时不会合并、也不会解析
+  对应的全局项，避免 `Authorization: Bearer {{token}}` 在登录前报未解析变量；其他请求继续默认使用。
+  选择保存在请求上，复制请求、cURL、场景运行和场景 JSON 导出都会遵守。
 - 模板函数：在 `{{...}}` 中调用函数，对变量做编码、哈希、签名等处理，例如
   `{{base64(token)}}`、`{{urlencode(base64(token))}}`、`{{rsaEncrypt(secret, rsaPublicKey)}}`。
   - URL、Query、Path、Header、Body 和环境变量值都支持；场景运行作用域里的上游出参同样可用。

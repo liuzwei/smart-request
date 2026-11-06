@@ -33,7 +33,8 @@ class ScenarioJsonTest {
             headers = mutableListOf(KeyValue.of("X-Test", "yes")),
             bodyType = BodyType.JSON.name,
             body = """{"user":"ada"}""",
-            extractors = mutableListOf(ResponseExtractor(variable = "token", source = "data.token"))
+            extractors = mutableListOf(ResponseExtractor(variable = "token", source = "data.token")),
+            useGlobalHeaders = false
         )
         val cart = HttpRequestConfig(id = "r2", name = "Cart", url = "{{baseUrl}}/cart")
         return mutableMapOf("r1" to login, "r2" to cart)
@@ -77,6 +78,8 @@ class ScenarioJsonTest {
         assertEquals(BodyType.JSON.name, login.bodyType)
         assertEquals("""{"user":"ada"}""", login.body)
         assertEquals("data.token", login.extractors.single().source)
+        assertEquals(false, login.useGlobalHeaders)
+        assertEquals(true, login.useGlobalParams)
 
         assertEquals(4, bundle.nodes.size)
         assertEquals(3, bundle.edges.size) // start -> r1, r1 -> r2, r2 -> end
