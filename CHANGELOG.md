@@ -22,6 +22,8 @@
     `bearer(value) = concat('Bearer ', base64(value))`，请求里用 `{{bearer(token)}}`；
     宏只能使用参数、字面量和其他函数，不能读环境变量；保存时校验语法、未知函数、参数个数和重名，
     递归调用最多 20 层。
+  - `Functions` 对话框新增 `Built-in` 页：完整列出内置函数的类别、签名、示例和使用范围，支持过滤、
+    查看说明和一键复制示例；`My functions` 页继续管理项目宏。
   - 场景校验从函数参数中提取真实变量依赖（`{{base64(token)}}` 依赖 `token`），并在运行前报告
     未知函数、参数个数错误和模板语法错误。
   - 函数目录和使用说明见 [`docs/template-functions.md`](docs/template-functions.md)。

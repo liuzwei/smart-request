@@ -14,6 +14,10 @@ Functions are available in the URL, query parameters, path parameters, headers a
 environment variable values. Scenario runs resolve them against the run scope, so a value captured
 by an upstream step can be transformed before the next request is sent.
 
+In the plugin, the toolbar's `Functions` button opens a `Built-in` tab with every function's
+category, signature, example and usage scope. Select a row to read the description, double-click or
+use `Copy example` to copy the snippet. The `My functions` tab manages project macros.
+
 ## Syntax
 
 ```
