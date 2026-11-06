@@ -26,6 +26,12 @@ object BuiltInFunctions {
         add(function("base64Decode", 1, 1) { args ->
             String(Base64.getDecoder().decode(args[0].trim()), StandardCharsets.UTF_8)
         })
+        add(function("base64ToHex", 1, 1) { args ->
+            hex(Base64.getDecoder().decode(args[0].trim()))
+        })
+        add(function("hexToBase64", 1, 1) { args ->
+            Base64.getEncoder().encodeToString(unhexBytes(args[0]))
+        })
         add(function("urlencode", 1, 1) { args ->
             URLEncoder.encode(args[0], StandardCharsets.UTF_8).replace("+", "%20")
         })
@@ -37,19 +43,11 @@ object BuiltInFunctions {
         })
         add(function("hex", 1, 1) { args -> hex(args[0].toByteArray(StandardCharsets.UTF_8)) })
         add(function("unhex", 1, 1) { args ->
-            val compact = args[0].replace(Regex("\\s+"), "")
-            if (compact.length % 2 != 0) {
-                throw TemplateFunctionException("hex input must have an even number of characters")
-            }
-            val bytes = ByteArray(compact.length / 2) { index ->
-                val pair = compact.substring(index * 2, index * 2 + 2)
-                pair.toIntOrNull(16)?.toByte()
-                    ?: throw TemplateFunctionException("invalid hex input at position ${index * 2}")
-            }
-            String(bytes, StandardCharsets.UTF_8)
+            String(unhexBytes(args[0]), StandardCharsets.UTF_8)
         })
         add(function("lower", 1, 1) { args -> args[0].lowercase(Locale.ROOT) })
         add(function("upper", 1, 1) { args -> args[0].uppercase(Locale.ROOT) })
+        add(function("reverse", 1, 1) { args -> args[0].reversed() })
         add(function("trim", 1, 1) { args -> args[0].trim() })
         add(function("length", 1, 1) { args -> args[0].length.toString() })
         add(function("concat", 0, 32) { args -> args.joinToString("") })
@@ -114,6 +112,18 @@ object BuiltInFunctions {
             val value = byte.toInt() and 0xFF
             append(HEX[value ushr 4])
             append(HEX[value and 0x0F])
+        }
+    }
+
+    private fun unhexBytes(value: String): ByteArray {
+        val compact = value.replace(Regex("\\s+"), "")
+        if (compact.length % 2 != 0) {
+            throw TemplateFunctionException("hex input must have an even number of characters")
+        }
+        return ByteArray(compact.length / 2) { index ->
+            val pair = compact.substring(index * 2, index * 2 + 2)
+            pair.toIntOrNull(16)?.toByte()
+                ?: throw TemplateFunctionException("invalid hex input at position ${index * 2}")
         }
     }
 

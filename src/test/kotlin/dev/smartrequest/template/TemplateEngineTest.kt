@@ -114,6 +114,19 @@ class TemplateEngineTest {
     }
 
     @Test
+    fun `login fields can be built from username and password`() {
+        val variables = mapOf("username" to "alice", "password" to "secret")
+        assertEquals(
+            "WVd4cFkyVT0=",
+            TemplateEngine.resolve("{{base64(base64(username))}}", variables).text
+        )
+        assertEquals(
+            "terces",
+            TemplateEngine.resolve("{{reverse(password)}}", variables).text
+        )
+    }
+
+    @Test
     fun `unresolved variables are not reported as function errors`() {
         val analysis = TemplateEngine.analyze("{{base64(token)}}")
         assertTrue(analysis.issues.isEmpty())

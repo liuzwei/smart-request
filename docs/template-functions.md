@@ -50,6 +50,8 @@ by an upstream step can be transformed before the next request is sent.
 | `base64(value)` | Standard Base64, UTF-8 |
 | `base64url(value)` | URL-safe Base64 without padding |
 | `base64Decode(value)` | Decode standard Base64 to UTF-8 text |
+| `base64ToHex(value)` | Decode Base64 to bytes, then encode as lowercase hex |
+| `hexToBase64(value)` | Decode hex to bytes, then encode as Base64 |
 | `urlencode(value)` | Percent-encode (space becomes `%20`) |
 | `urlencodeForm(value)` | Form encoding (space becomes `+`) |
 | `urldecode(value)` | Decode percent/form encoding |
@@ -69,7 +71,7 @@ by an upstream step can be transformed before the next request is sent.
 
 ### Strings
 
-`concat(...)` (up to 32 arguments), `lower`, `upper`, `trim`, `length`, `replace(value, target,
+`concat(...)` (up to 32 arguments), `lower`, `upper`, `reverse`, `trim`, `length`, `replace(value, target,
 replacement)`, `default(value, fallback)`, `substring(value, start[, end])`, `jsonEscape(value)`.
 
 `jsonEscape` escapes `\`, `"` and control characters; use it when a variable is placed inside a JSON
@@ -125,6 +127,28 @@ verification use SHA-256. Output is standard Base64.
   the resolved values.
 
 ## Examples
+
+Double-Base64 a username, reverse a password and RSA-encrypt it as hex:
+
+```json
+{
+  "loginName": "{{base64(base64(username))}}",
+  "password": "{{base64ToHex(rsaEncrypt(reverse(password), rsaPublicKey))}}"
+}
+```
+
+`base64ToHex` is needed because RSA returns Base64 ciphertext; it decodes that Base64 to raw
+ciphertext bytes and emits lowercase hex. Use `upper(...)` around it if the API expects uppercase:
+
+```json
+{"password":"{{upper(base64ToHex(rsaEncrypt(reverse(password), rsaPublicKey)))}}"}
+```
+
+If the API expects Base64 ciphertext instead, omit the conversion:
+
+```json
+{"password":"{{rsaEncrypt(reverse(password), rsaPublicKey)}}"}
+```
 
 Base64 a captured token in a JSON body:
 

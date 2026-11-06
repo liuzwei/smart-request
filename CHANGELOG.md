@@ -10,9 +10,9 @@
 - 模板函数：在 `{{...}}` 中调用函数，对变量做编码、哈希、签名等处理，例如
   `{{base64(token)}}`、`{{urlencode(base64(token))}}`、`{{rsaEncrypt(secret, rsaPublicKey)}}`。
   - URL、Query、Path、Header、Body 和环境变量值都支持；场景运行作用域里的上游出参同样可用。
-  - 内置 `base64`/`base64url`/`urlencode`/`urldecode`/`hex`/`unhex`、`md5`/`sha1`/`sha256`/`sha512`、
-    `hmacSha256`/`hmacSha256Base64`、`concat`/`lower`/`upper`/`trim`/`length`/`replace`/`default`/
-    `substring`/`jsonEscape`。
+  - 内置 `base64`/`base64url`/`base64ToHex`/`hexToBase64`/`urlencode`/`urldecode`/`hex`/`unhex`、
+    `md5`/`sha1`/`sha256`/`sha512`、`hmacSha256`/`hmacSha256Base64`、`concat`/`lower`/`upper`/`reverse`/
+    `trim`/`length`/`replace`/`default`/`substring`/`jsonEscape`。
   - 内置 RSA：`rsaEncrypt`（OAEP-SHA256）、`rsaEncryptPkcs1`、`rsaDecrypt`、`rsaDecryptPkcs1`、
     `rsaSign`（SHA256withRSA）、`rsaVerify`；支持 PKCS#8/X.509 和旧式 PKCS#1 PEM 密钥。
   - 纯宏：工具栏 `Functions` 里定义名称、参数和表达式，例如

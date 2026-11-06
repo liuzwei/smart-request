@@ -29,6 +29,8 @@ class BuiltInFunctionsTest {
         assertEquals("a+b", invoke("urlencodeForm", "a b"))
         assertEquals("68656c6c6f", invoke("hex", "hello"))
         assertEquals("hello", invoke("unhex", "68 65 6c 6c 6f"))
+        assertEquals("aGVsbG8=", invoke("hexToBase64", "68656c6c6f"))
+        assertEquals("68656c6c6f", invoke("base64ToHex", "aGVsbG8="))
     }
 
     @Test
@@ -48,6 +50,7 @@ class BuiltInFunctionsTest {
     @Test
     fun `string helpers`() {
         assertEquals("Bearer x", invoke("concat", "Bearer ", "x"))
+        assertEquals("cba", invoke("reverse", "abc"))
         assertEquals("abc", invoke("substring", "abcdef", "0", "3"))
         assertEquals("fallback", invoke("default", "", "fallback"))
         assertEquals("a\\\"b", invoke("jsonEscape", "a\"b"))
@@ -61,6 +64,11 @@ class BuiltInFunctionsTest {
 
         val ciphertext = invoke("rsaEncrypt", "hello rsa", publicPem)
         assertEquals("hello rsa", invoke("rsaDecrypt", ciphertext, privatePem))
+        val hexCiphertext = invoke("base64ToHex", ciphertext)
+        assertEquals(
+            "hello rsa",
+            invoke("rsaDecrypt", invoke("hexToBase64", hexCiphertext), privatePem)
+        )
 
         val pkcs1Ciphertext = invoke("rsaEncryptPkcs1", "hello rsa", publicPem)
         assertEquals("hello rsa", invoke("rsaDecryptPkcs1", pkcs1Ciphertext, privatePem))

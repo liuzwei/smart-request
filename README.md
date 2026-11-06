@@ -73,10 +73,10 @@
 `{{...}}` 里可以调用函数，对变量做编码、哈希、签名等处理；URL、Query、Path、Header、Body 和场景运行作用域都支持。
 
 - 语法：`{{base64(token)}}`、`{{urlencode(base64(token))}}`、`{{concat('Bearer ', token)}}`。
-- 内置编码：`base64`、`base64url`、`urlencode`、`urldecode`、`hex`、`unhex`。
+- 内置编码：`base64`、`base64url`、`base64ToHex`、`hexToBase64`、`urlencode`、`urldecode`、`hex`、`unhex`。
 - 内置哈希/MAC：`md5`、`sha1`、`sha256`、`sha512`、`hmacSha256`、`hmacSha256Base64`。
 - 内置 RSA：`rsaEncrypt`、`rsaEncryptPkcs1`、`rsaDecrypt`、`rsaDecryptPkcs1`、`rsaSign`、`rsaVerify`；密钥用 PEM（PKCS#8/X.509 或 PKCS#1）放在环境变量里。
-- 字符串：`concat`、`lower`、`upper`、`trim`、`length`、`replace`、`default`、`substring`、`jsonEscape`。
+- 字符串：`concat`、`lower`、`upper`、`reverse`、`trim`、`length`、`replace`、`default`、`substring`、`jsonEscape`。
 - 工具栏 `Functions` 可以定义纯宏，例如 `bearer(value) = concat('Bearer ', base64(value))`，然后在请求里写 `{{bearer(token)}}`；宏只能使用自己的参数、字面量和其他函数，不能读环境变量。
 - 函数结果不会被二次解析；变量值本身仍是模板，可以递归。未知函数、参数个数错误和语法错误会在发送前失败。
 - 场景校验会从 `{{base64(token)}}` 中提取 `token` 作为依赖，因此上游捕获的变量可以直接使用。
@@ -407,7 +407,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（335 个）：
+当前测试覆盖（336 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
