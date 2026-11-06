@@ -123,6 +123,8 @@ Run-time blocking checks live in `ScenarioValidator`, are pure, and are reused b
 
 The variable check runs against the snapshot taken at run start (environment + parameters), so it is exact rather than heuristic; it is the main safety net for data flow.
 
+Template functions are expression-aware: `{{base64(token)}}` contributes a dependency on `token` (not on a variable named `base64(token)`), so an upstream capture passes validation. Unknown functions, wrong argument counts and malformed templates are reported as validation errors before the run starts.
+
 ### 4.2 Warnings (do not block)
 
 | Check | Message shape |

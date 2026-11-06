@@ -87,6 +87,54 @@ class RequestPreparerTest {
     }
 
     @Test
+    fun `functions can be used in url query headers and body`() {
+        val request = HttpRequestConfig().apply {
+            method = "POST"
+            url = "{{baseUrl}}/api/{{urlencode(name)}}"
+            params.add(KeyValue.of("q", "{{base64(token)}}"))
+            headers.add(KeyValue.of("X-Hash", "{{sha256(payload)}}"))
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{base64(token)}}"}"""
+        }
+
+        val prepared = RequestPreparer.prepare(
+            request,
+            environment,
+            emptyList(),
+            emptyList(),
+            30_000,
+            true,
+            variables = mapOf(
+                "name" to "a b",
+                "token" to "secret",
+                "payload" to "hello"
+            )
+        )
+
+        assertEquals("http://localhost:8080/api/a%20b?q=c2VjcmV0", prepared.request.url)
+        assertEquals(
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            header(prepared.request.headers, "X-Hash")
+        )
+        assertEquals("""{"token":"c2VjcmV0"}""", prepared.request.body)
+    }
+
+    @Test
+    fun `unknown functions fail before the request is sent`() {
+        val request = HttpRequestConfig().apply {
+            method = "POST"
+            url = "{{baseUrl}}/users"
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{nope(token)}}"}"""
+        }
+
+        val error = assertThrows(RequestBuildException::class.java) {
+            RequestPreparer.prepare(request, environment, emptyList(), emptyList(), 30_000, true)
+        }
+        assertTrue(error.message!!.contains("Unknown function 'nope'"))
+    }
+
+    @Test
     fun `no body means null body`() {
         val request = HttpRequestConfig().apply {
             url = "{{baseUrl}}/hello"

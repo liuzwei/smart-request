@@ -77,6 +77,81 @@ class ScenarioValidatorTest {
     }
 
     @Test
+    fun `captured variables can be transformed by functions`() {
+        val loginRequest = request("login", "{{baseUrl}}/login")
+        val orderRequest = request("orders", "{{baseUrl}}/orders").apply {
+            method = "POST"
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{base64(token)}}"}"""
+        }
+        val startNode = start()
+        val loginNode = node(
+            "login-node",
+            loginRequest.id,
+            ResponseExtractor(variable = "token", source = "data.token")
+        )
+        val orderNode = node("order-node", orderRequest.id)
+        val endNode = end()
+
+        val report = validate(
+            scenario(
+                startNode, loginNode, orderNode, endNode,
+                edges = listOf(
+                    edge(startNode, loginNode),
+                    edge(loginNode, orderNode),
+                    edge(orderNode, endNode)
+                )
+            )
+        )
+
+        assertTrue(report.isValid, report.problems.joinToString { it.message })
+    }
+
+    @Test
+    fun `a missing variable inside a function is reported by name`() {
+        val orderRequest = request("orders", "{{baseUrl}}/orders").apply {
+            method = "POST"
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{base64(absent)}}"}"""
+        }
+        val startNode = start()
+        val orderNode = node("order-node", orderRequest.id)
+        val endNode = end()
+
+        val report = validate(
+            scenario(
+                startNode, orderNode, endNode,
+                edges = listOf(edge(startNode, orderNode), edge(orderNode, endNode))
+            )
+        )
+
+        assertFalse(report.isValid)
+        assertTrue(report.errors.any { it.message.contains("needs {{absent}}") })
+    }
+
+    @Test
+    fun `an unknown function is a validation error`() {
+        val orderRequest = request("orders", "{{baseUrl}}/orders").apply {
+            method = "POST"
+            bodyType = BodyType.JSON.name
+            body = """{"token":"{{missingFn(token)}}"}"""
+        }
+        val startNode = start()
+        val orderNode = node("order-node", orderRequest.id)
+        val endNode = end()
+
+        val report = validate(
+            scenario(
+                startNode, orderNode, endNode,
+                edges = listOf(edge(startNode, orderNode), edge(orderNode, endNode))
+            )
+        )
+
+        assertFalse(report.isValid)
+        assertTrue(report.errors.any { it.message.contains("Unknown function 'missingFn'") })
+    }
+
+    @Test
     fun `an empty scenario only warns about missing requests`() {
         val scenario = ScenarioConfig().apply { normalize() }
 

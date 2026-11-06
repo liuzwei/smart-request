@@ -5,6 +5,8 @@ import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.enabledValues
+import dev.smartrequest.template.FunctionRegistry
+import dev.smartrequest.template.TemplateEngine
 
 data class PreparedRequest(
     val method: String,
@@ -36,7 +38,8 @@ object RequestPreparer {
         globalParams: List<KeyValue>,
         timeoutMs: Int,
         followRedirects: Boolean,
-        variables: Map<String, String> = emptyMap()
+        variables: Map<String, String> = emptyMap(),
+        registry: FunctionRegistry = FunctionRegistry.builtIns()
     ): PrepareResult {
         // Run-scoped values (scenario parameters and captured values) win over the environment, so a
         // scenario can pass a token downstream without mutating the environment.
@@ -45,18 +48,28 @@ object RequestPreparer {
             variables
         )
         val warnings = LinkedHashSet<String>()
+        val errors = ArrayList<String>()
 
         val mergedParams = mergeParameters(request.params, globalParams)
-        val urlResult = RequestUrlBuilder.build(request.url, mergedParams, resolvedVariables, request.pathParams)
+        val urlResult = RequestUrlBuilder.build(
+            request.url,
+            mergedParams,
+            resolvedVariables,
+            request.pathParams,
+            registry
+        )
         warnings += urlResult.unresolved
+        errors += urlResult.errors
 
         val mergedHeaders = mergeHeaders(request.headers, globalHeaders)
         val finalHeaders = LinkedHashMap<String, String>()
         for ((key, value) in mergedHeaders) {
-            val resolvedKey = VariableResolver.resolve(key, resolvedVariables)
-            val resolvedValue = VariableResolver.resolve(value, resolvedVariables)
+            val resolvedKey = TemplateEngine.resolve(key, resolvedVariables, registry)
+            val resolvedValue = TemplateEngine.resolve(value, resolvedVariables, registry)
             warnings += resolvedKey.unresolved
             warnings += resolvedValue.unresolved
+            errors += resolvedKey.errors
+            errors += resolvedValue.errors
             val normalizedKey = resolvedKey.text.trim()
             if (normalizedKey.isEmpty() || normalizedKey.lowercase() in RESERVED_HEADERS) continue
             finalHeaders[normalizedKey] = resolvedValue.text
@@ -66,11 +79,15 @@ object RequestPreparer {
         val body = if (bodyType == BodyType.NONE) {
             null
         } else {
-            val resolvedBody = VariableResolver.resolve(request.body, resolvedVariables)
+            val resolvedBody = TemplateEngine.resolve(request.body, resolvedVariables, registry)
             warnings += resolvedBody.unresolved
+            errors += resolvedBody.errors
             resolvedBody.text
         }
 
+        if (errors.isNotEmpty()) {
+            throw RequestBuildException(errors.distinct().joinToString("; "))
+        }
         if (warnings.isNotEmpty()) {
             throw RequestBuildException("Unresolved variables: ${warnings.joinToString(", ")}")
         }

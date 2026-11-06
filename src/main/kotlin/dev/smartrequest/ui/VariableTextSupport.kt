@@ -5,6 +5,8 @@ import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import dev.smartrequest.template.TemplateEngine
+import dev.smartrequest.template.TemplateParser
 import java.awt.Point
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -26,7 +28,6 @@ class VariableTextSupport(
     private val requestFocusInPopup: Boolean = true,
     private val enableCompletion: Boolean = true
 ) {
-    private val pattern = Regex("""\{\{\s*([^{}\s]+?)\s*}}""")
     private val pathPattern = Regex("""(?<!\{)\{([A-Za-z_][A-Za-z0-9_.-]*)(?::[^{}]*)?}(?!})""")
     private var popup: JBPopup? = null
 
@@ -100,10 +101,17 @@ class VariableTextSupport(
         val text = component.text
         if (text.isEmpty()) return
         val variables = variablesProvider()
-        pattern.findAll(text).forEach { match ->
-            val known = variables.containsKey(match.groupValues[1])
-            val color = if (known) KNOWN_BACKGROUND else UNKNOWN_BACKGROUND
-            addHighlight(match.range.first, match.range.last + 1, color)
+        val analysis = TemplateEngine.analyze(text)
+        TemplateParser.parse(text).segments.forEach { segment ->
+            if (segment.expression == null) return@forEach
+            val hasIssue = analysis.issues.any { it.start < segment.end && it.end > segment.start }
+            val hasUnknownVariable = analysis.references.any { reference ->
+                reference.start < segment.end &&
+                    reference.end > segment.start &&
+                    !variables.containsKey(reference.name)
+            }
+            val color = if (hasIssue || hasUnknownVariable) UNKNOWN_BACKGROUND else KNOWN_BACKGROUND
+            addHighlight(segment.start, segment.end, color)
         }
         if (highlightPathParameters) {
             pathPattern.findAll(text).forEach { match ->

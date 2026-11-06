@@ -1,22 +1,36 @@
 package dev.smartrequest.ui
 
 import com.intellij.ui.JBColor
+import dev.smartrequest.template.TemplateEngine
+import dev.smartrequest.template.TemplateParser
 import java.awt.Color
 import java.awt.Font
 
 /**
  * Produces a small HTML fragment for table cell renderers. Swing's HTML labels do not support rich
- * document models cheaply, so variable tokens are highlighted with a background span instead.
+ * document models cheaply, so `{{...}}` expressions are highlighted with a background span instead.
  */
 object VariableHtml {
-    private val PATTERN = Regex("""\{\{\s*([^{}\s]+?)\s*}}""")
 
     fun render(value: String, knownNames: Set<String>, baseColor: Color, font: Font): String {
-        val escaped = escapeHtml(value)
-        val body = PATTERN.replace(escaped) { match ->
-            val name = match.groupValues[1]
-            val background = if (knownNames.contains(name)) KNOWN_BACKGROUND else UNKNOWN_BACKGROUND
-            "<span style=\"background-color:${hex(background)};\">${match.value}</span>"
+        val analysis = TemplateEngine.analyze(value)
+        val body = StringBuilder()
+        TemplateParser.parse(value).segments.forEach { segment ->
+            val raw = value.substring(segment.start, segment.end)
+            if (segment.expression == null) {
+                body.append(escapeHtml(raw))
+                return@forEach
+            }
+            val hasIssue = analysis.issues.any { it.start < segment.end && it.end > segment.start }
+            val hasUnknown = analysis.references.any { reference ->
+                reference.start < segment.end &&
+                    reference.end > segment.start &&
+                    !knownNames.contains(reference.name)
+            }
+            val background = if (hasIssue || hasUnknown) UNKNOWN_BACKGROUND else KNOWN_BACKGROUND
+            body.append("<span style=\"background-color:${hex(background)};\">")
+            body.append(escapeHtml(raw))
+            body.append("</span>")
         }
         val family = font.family.replace("'", "")
         return "<html><body style=\"font-family:'$family';font-size:${font.size}px;" +

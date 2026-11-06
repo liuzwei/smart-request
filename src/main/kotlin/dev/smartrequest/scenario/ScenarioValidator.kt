@@ -3,7 +3,7 @@ package dev.smartrequest.scenario
 import dev.smartrequest.extract.JsonPath
 import dev.smartrequest.extract.PathSyntaxException
 import dev.smartrequest.extract.ResponseExtractorEngine
-import dev.smartrequest.http.VariableResolver
+import dev.smartrequest.template.TemplateEngine
 import dev.smartrequest.model.BodyType
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.ScenarioConfig
@@ -301,6 +301,17 @@ object ScenarioValidator {
 
         requestNodes.forEach { node ->
             val request = requestFor(node) ?: return@forEach
+            requestTexts(request)
+                .flatMap { TemplateEngine.analyze(it).issues }
+                .map { it.message }
+                .distinct()
+                .forEach { message ->
+                    error(
+                        "Node '${label(node)}' has an invalid template: $message",
+                        node.id,
+                        null
+                    )
+                }
             val needed = neededVariables(request)
             val missing = needed -
                     available[node.id].orEmpty() -
@@ -365,7 +376,10 @@ object ScenarioValidator {
     }
 
     /** Every `{{name}}` that appears in the request, regardless of whether it currently resolves. */
-    fun neededVariables(request: HttpRequestConfig): Set<String> {
+    fun neededVariables(request: HttpRequestConfig): Set<String> =
+        requestTexts(request).flatMapTo(LinkedHashSet()) { TemplateEngine.analyze(it).variables }
+
+    private fun requestTexts(request: HttpRequestConfig): List<String> {
         val texts = ArrayList<String>()
         texts.add(request.url)
         if (request.bodyTypeEnum() != BodyType.NONE) texts.add(request.body)
@@ -384,7 +398,7 @@ object ScenarioValidator {
             texts.add(header.key)
             texts.add(header.value)
         }
-        return texts.flatMapTo(LinkedHashSet()) { VariableResolver.unresolvedNames(it) }
+        return texts
     }
 
     fun captureNames(node: ScenarioNode): List<String> =

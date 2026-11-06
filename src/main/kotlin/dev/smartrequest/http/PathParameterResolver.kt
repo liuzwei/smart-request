@@ -1,6 +1,8 @@
 package dev.smartrequest.http
 
 import dev.smartrequest.model.KeyValue
+import dev.smartrequest.template.FunctionRegistry
+import dev.smartrequest.template.TemplateEngine
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -15,7 +17,8 @@ object PathParameterResolver {
 
     data class PathResolution(
         val url: String,
-        val unresolved: Set<String>
+        val unresolved: Set<String>,
+        val errors: List<String> = emptyList()
     )
 
     fun detectNames(url: String): List<String> {
@@ -29,7 +32,8 @@ object PathParameterResolver {
     fun resolve(
         url: String,
         pathParams: List<KeyValue>,
-        variables: Map<String, String>
+        variables: Map<String, String>,
+        registry: FunctionRegistry = FunctionRegistry.builtIns()
     ): PathResolution {
         val pathEnd = firstSeparator(url)
         val path = url.substring(0, pathEnd)
@@ -37,20 +41,22 @@ object PathParameterResolver {
         val values = LinkedHashMap<String, KeyValue>()
         pathParams.filter { it.key.isNotBlank() }.forEach { values.putIfAbsent(it.key.trim(), it) }
         val unresolved = LinkedHashSet<String>()
+        val errors = ArrayList<String>()
 
         val resolvedPath = PLACEHOLDER.replace(path) { match ->
             val name = match.groupValues[1]
             val parameter = values[name]
                 ?: throw RequestBuildException("Path parameter '$name' has no value")
-            val resolved = VariableResolver.resolve(parameter.value, variables)
+            val resolved = TemplateEngine.resolve(parameter.value, variables, registry)
             unresolved += resolved.unresolved
+            errors += resolved.errors
             if (resolved.text.isBlank()) {
                 throw RequestBuildException("Path parameter '$name' is empty")
             }
             encodePathSegment(resolved.text)
         }
 
-        return PathResolution(resolvedPath + suffix, unresolved)
+        return PathResolution(resolvedPath + suffix, unresolved, errors.distinct())
     }
 
     fun encodePathSegment(value: String): String =

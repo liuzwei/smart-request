@@ -7,6 +7,17 @@
 
 ### Added
 
+- 模板函数：在 `{{...}}` 中调用函数，对变量做编码、哈希、签名等处理，例如
+  `{{base64(token)}}`、`{{urlencode(base64(token))}}`、`{{rsaEncrypt(secret, rsaPublicKey)}}`。
+  - URL、Query、Path、Header、Body 和环境变量值都支持；场景运行作用域里的上游出参同样可用。
+  - 内置 `base64`/`base64url`/`urlencode`/`urldecode`/`hex`/`unhex`、`md5`/`sha1`/`sha256`/`sha512`、
+    `hmacSha256`/`hmacSha256Base64`、`concat`/`lower`/`upper`/`trim`/`length`/`replace`/`default`/
+    `substring`/`jsonEscape`。
+  - 内置 RSA：`rsaEncrypt`（OAEP-SHA256）、`rsaEncryptPkcs1`、`rsaDecrypt`、`rsaDecryptPkcs1`、
+    `rsaSign`（SHA256withRSA）、`rsaVerify`；支持 PKCS#8/X.509 和旧式 PKCS#1 PEM 密钥。
+  - 场景校验从函数参数中提取真实变量依赖（`{{base64(token)}}` 依赖 `token`），并在运行前报告
+    未知函数、参数个数错误和模板语法错误。
+  - 函数目录和使用说明见 [`docs/template-functions.md`](docs/template-functions.md)。
 - Headers 的 Key 单元格增加下拉选择：内置 31 个常用 HTTP Header（`Authorization`、`Content-Type`、
   `If-None-Match` 等），点 `▾` 选择，也仍然可以直接手写任意 Header 名；环境级的 `Global Headers`
   表格同样支持。

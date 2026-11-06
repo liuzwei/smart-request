@@ -68,6 +68,20 @@
 - Params / Headers / Path Params 的单元格编辑器里同样支持补全：输入 `{{` 自动弹出，或按 `Ctrl+Space` 主动触发；弹窗不会抢走单元格焦点，选中后继续在单元格里输入。
 - 切换环境后，高亮颜色和补全列表立即刷新。
 
+### 模板函数
+
+`{{...}}` 里可以调用函数，对变量做编码、哈希、签名等处理；URL、Query、Path、Header、Body 和场景运行作用域都支持。
+
+- 语法：`{{base64(token)}}`、`{{urlencode(base64(token))}}`、`{{concat('Bearer ', token)}}`。
+- 内置编码：`base64`、`base64url`、`urlencode`、`urldecode`、`hex`、`unhex`。
+- 内置哈希/MAC：`md5`、`sha1`、`sha256`、`sha512`、`hmacSha256`、`hmacSha256Base64`。
+- 内置 RSA：`rsaEncrypt`、`rsaEncryptPkcs1`、`rsaDecrypt`、`rsaDecryptPkcs1`、`rsaSign`、`rsaVerify`；密钥用 PEM（PKCS#8/X.509 或 PKCS#1）放在环境变量里。
+- 字符串：`concat`、`lower`、`upper`、`trim`、`length`、`replace`、`default`、`substring`、`jsonEscape`。
+- 函数结果不会被二次解析；变量值本身仍是模板，可以递归。未知函数、参数个数错误和语法错误会在发送前失败。
+- 场景校验会从 `{{base64(token)}}` 中提取 `token` 作为依赖，因此上游捕获的变量可以直接使用。
+
+完整函数表和 RSA 示例见 [docs/template-functions.md](docs/template-functions.md)。
+
 ### 请求历史与响应缓存
 
 - 每次请求完成（成功、HTTP 4xx/5xx、网络错误）都会记录一条历史：
@@ -392,7 +406,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（300 个）：
+当前测试覆盖（326 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -578,12 +592,17 @@ src/main/kotlin/dev/smartrequest/
 ├── editor/                  # Controller 类/方法 Gutter 图标
 ├── http/
 │   ├── HttpTransport.kt     # java.net.http 封装、响应解码、gzip
-│   ├── RequestPreparer.kt   # 变量解析、Header/Param 合并、校验
+│   ├── RequestPreparer.kt   # 模板函数/变量解析、Header/Param 合并、校验
 │   ├── RequestUrlBuilder.kt # URL 构建与编码
 │   ├── QueryParams.kt       # URL 查询串与参数行的双向转换
 │   ├── PathParameterResolver.kt # {path} 参数替换与编码
 │   ├── CurlCommandBuilder.kt# Linux/PowerShell cURL 生成
-│   └── VariableResolver.kt  # {{variable}} 递归解析
+│   └── VariableResolver.kt  # 简单变量递归解析（兼容旧调用）
+├── template/                # {{expression}} 解析、函数注册表、内置函数与 RSA
+│   ├── Template.kt          # 词法/语法分析、求值、静态引用提取
+│   ├── TemplateFunction.kt  # 函数接口与大小写不敏感注册表
+│   ├── BuiltInFunctions.kt  # base64/URL/hex/hash/HMAC/字符串函数
+│   └── RsaFunctions.kt      # RSA 加解密、签名/验签、PEM/DER 密钥解析
 ├── model/                   # 持久化模型（环境、请求、场景、历史）
 ├── scenario/                # 场景编排：图编辑、校验、DAG 执行
 │   ├── ScenarioGraph.kt     # 依赖编辑、Start/End 自动连线、执行顺序、连线校验

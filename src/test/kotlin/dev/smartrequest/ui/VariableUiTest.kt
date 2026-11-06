@@ -17,6 +17,16 @@ class VariableUiTest : BasePlatformTestCase() {
         })
     }
 
+    fun testFunctionExpressionsAreHighlightedAsOneExpression() {
+        runOnEdt(object : Runnable {
+            override fun run() {
+                val field = VariableTextField(::variables)
+                field.text = "{{base64(baseUrl)}}/{{urlencode(name)}}"
+                assertEquals(2, field.highlighter.highlights.size)
+            }
+        })
+    }
+
     fun testUrlFieldAlsoHighlightsSingleBracePathParameters() {
         runOnEdt(object : Runnable {
             override fun run() {

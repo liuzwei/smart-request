@@ -1,6 +1,8 @@
 package dev.smartrequest.http
 
 import dev.smartrequest.model.KeyValue
+import dev.smartrequest.template.FunctionRegistry
+import dev.smartrequest.template.TemplateEngine
 import java.net.URI
 import java.net.URISyntaxException
 import java.net.URLEncoder
@@ -10,7 +12,8 @@ class RequestBuildException(message: String, cause: Throwable? = null) : Excepti
 
 data class UrlBuildResult(
     val url: String,
-    val unresolved: Set<String>
+    val unresolved: Set<String>,
+    val errors: List<String> = emptyList()
 )
 
 /**
@@ -27,13 +30,17 @@ object RequestUrlBuilder {
         rawUrl: String,
         parameters: List<Pair<String, String>>,
         variables: Map<String, String> = emptyMap(),
-        pathParams: List<KeyValue> = emptyList()
+        pathParams: List<KeyValue> = emptyList(),
+        registry: FunctionRegistry = FunctionRegistry.builtIns()
     ): UrlBuildResult {
         val unresolved = LinkedHashSet<String>()
-        val resolvedUrl = VariableResolver.resolve(rawUrl, variables)
+        val errors = ArrayList<String>()
+        val resolvedUrl = TemplateEngine.resolve(rawUrl, variables, registry)
         unresolved += resolvedUrl.unresolved
-        val resolvedPath = PathParameterResolver.resolve(resolvedUrl.text, pathParams, variables)
+        errors += resolvedUrl.errors
+        val resolvedPath = PathParameterResolver.resolve(resolvedUrl.text, pathParams, variables, registry)
         unresolved += resolvedPath.unresolved
+        errors += resolvedPath.errors
         var url = resolvedPath.url.trim()
 
         if (url.isEmpty()) {
@@ -48,10 +55,12 @@ object RequestUrlBuilder {
         }
 
         val additions = parameters.map { (key, value) ->
-            val resolvedKey = VariableResolver.resolve(key, variables)
-            val resolvedValue = VariableResolver.resolve(value, variables)
+            val resolvedKey = TemplateEngine.resolve(key, variables, registry)
+            val resolvedValue = TemplateEngine.resolve(value, variables, registry)
             unresolved += resolvedKey.unresolved
             unresolved += resolvedValue.unresolved
+            errors += resolvedKey.errors
+            errors += resolvedValue.errors
             "${encodeQueryComponent(resolvedKey.text)}=${encodeQueryComponent(resolvedValue.text)}"
         }
 
@@ -59,11 +68,11 @@ object RequestUrlBuilder {
             url = replaceQuery(url, additions)
         }
 
-        if (unresolved.isNotEmpty()) {
-            return UrlBuildResult(url, unresolved)
+        if (unresolved.isNotEmpty() || errors.isNotEmpty()) {
+            return UrlBuildResult(url, unresolved, errors.distinct())
         }
         validate(url)
-        return UrlBuildResult(url, unresolved)
+        return UrlBuildResult(url, unresolved, emptyList())
     }
 
     private fun hasScheme(url: String): Boolean =
