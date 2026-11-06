@@ -1,8 +1,8 @@
 package dev.smartrequest.ui
 
 import com.intellij.testFramework.EdtTestUtil
-import com.intellij.testFramework.assertNoErrorLogged
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.testFramework.recordErrorsLoggedInTheCurrentThreadAndReportThemAsFailures
 import dev.smartrequest.http.HttpResponseData
 import java.awt.Container
 import javax.swing.JButton
@@ -100,13 +100,13 @@ class ResponseJsonEditorUiTest : BasePlatformTestCase() {
                 }
             )
             EdtTestUtil.runInEdtAndWait<RuntimeException> {
-                assertNoErrorLogged {
+                recordErrorsLoggedInTheCurrentThreadAndReportThemAsFailures {
                     panel.show(jsonResponse("""{"c":{"d":2},"list":[4,5,6]}"""))
                 }
             }
             Thread.sleep(500)
             EdtTestUtil.runInEdtAndWait<RuntimeException> {
-                assertNoErrorLogged {
+                recordErrorsLoggedInTheCurrentThreadAndReportThemAsFailures {
                     panel.show(jsonResponse("""{"e":{"f":3}}"""))
                 }
             }

@@ -29,7 +29,8 @@
 
 结论：**Kotlin 负责插件逻辑和原生 UI，HTTP 层使用 JDK 自带的 `java.net.http.HttpClient`**。这样不需要引入 OkHttp/Jackson 等运行时依赖，插件包小，启动快。
 
-> 构建目标：IntelliJ IDEA 2026.2+（`since-build=262`），JVM 25。当前机器上的 IDEA 自带 JBR 25，可以直接作为 Gradle JVM。
+> 构建目标（本分支 `release-2024.3`）：IntelliJ IDEA **2024.3+**（`since-build=243`），JVM **21**，Kotlin stdlib 2.0。
+> `main` 分支仍然构建 **2026.2+**（`since-build=262`），JVM 25。两个分支使用同一插件 ID，按 IDE 版本分别发布。
 
 ---
 
@@ -319,14 +320,23 @@ Java Controller 的**类名**和带 Mapping 注解的**方法名**左侧会显�
 
 ### 环境要求
 
-- IntelliJ IDEA 2026.2 或更高版本
-- JDK 25（可以直接使用 IDEA 自带的 JBR）
+| 分支 | 最低 IntelliJ IDEA | `since-build` | JVM target | Kotlin stdlib |
+|---|---|---:|---:|---:|
+| `main` | 2026.2 | 262 | 25 | 2.4 |
+| `release-2024.3` | 2024.3 | 243 | 21 | 2.0.21 |
+
+本分支要求：
+
+- IntelliJ IDEA **2024.3 或更高版本**
+- JDK **21**（可以使用 IntelliJ IDEA 2024.3 自带的 JBR 21）
 
 检查 JBR：
 
 ```powershell
-& "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr\bin\java.exe" -version
+& "C:\Program Files\JetBrains\IntelliJ IDEA 2024.3\jbr\bin\java.exe" -version
 ```
+
+如果本机没有 JDK 21，`settings.gradle.kts` 里的 Foojay resolver 会让 Gradle 自动下载一个 JDK 21 用于 Kotlin/Java 编译；Gradle 本身仍可运行在 JBR 25 上。
 
 ### 运行插件（开发模式）
 
@@ -334,16 +344,19 @@ Java Controller 的**类名**和带 Mapping 注解的**方法名**左侧会显�
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
-.\gradlew.bat runIde -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
+.\gradlew.bat runIde
 ```
 
 说明：
 
-- `-PlocalIdePath=...` 表示直接使用本机安装的 IDEA 作为开发平台，避免重新下载完整 IDE。
-- 如果不传这个参数，Gradle 会下载 `intellijIdea("2026.2.2")`，第一次会比较慢。
+- 本分支默认下载并使用 `intellijIdea("2024.3.6")`，第一次会比较慢。
+- 如果本机已经安装了 IDEA 2024.3，可以改成：
+  ```powershell
+  .\gradlew.bat runIde -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA 2024.3"
+  ```
 - 也可以把路径写进 `gradle.properties`：
   ```properties
-  localIdePath=C:/Program Files/JetBrains/IntelliJ IDEA OSS
+  localIdePath=C:/Program Files/JetBrains/IntelliJ IDEA 2024.3
   ```
 
 启动后，在 IDEA 右侧边栏找到 **Smart Request** 工具窗口；也可以从 `Tools → Smart Request` 打开。
@@ -352,7 +365,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
-.\gradlew.bat buildPlugin -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
+.\gradlew.bat buildPlugin
 ```
 
 产物：
@@ -365,9 +378,11 @@ build/distributions/smart-request-<version>.zip
 
 ### 自动构建与发布（GitHub Actions）
 
-仓库自带 `.github/workflows/build.yml`，不需要预装 IDEA，runner 只用 JDK 25，IntelliJ Platform 由 Gradle 自动下载：
+仓库自带 `.github/workflows/build.yml`，不需要预装 IDEA：
 
-- push 到 `main`、PR、手动触发：执行 `./gradlew buildPlugin`，把 zip 作为 artifact 上传；
+- `main` 分支使用 JDK 25，构建 IntelliJ IDEA 2026.2+ 产物；
+- `release-2024.3` 分支使用 JDK 21，构建 IntelliJ IDEA 2024.3+ 产物（`since-build=243`）；
+- push 到对应分支、PR、手动触发：执行 `./gradlew buildPlugin`，把 zip 作为 artifact 上传；
 - push `v*` 形式的 tag：额外创建一个 GitHub Release，并把 zip 作为附件上传。
 
 发版流程：

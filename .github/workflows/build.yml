@@ -2,7 +2,7 @@ name: Build plugin
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, release-2024.3 ]
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
@@ -16,17 +16,17 @@ permissions:
 
 jobs:
   build:
-    name: buildPlugin (JDK 25)
+    name: buildPlugin (JDK 21)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 25
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "21"
 
       # Caches ~/.gradle, which includes the IntelliJ Platform distribution that the
       # IntelliJ Platform Gradle Plugin downloads on the first run (~700 MB).
@@ -34,7 +34,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # No local IDE needed: without -PlocalIdePath the build downloads IntelliJ IDEA
-      # Community 2026.2.2 from the JetBrains repository and compiles against it.
+      # 2024.3.6 from the JetBrains repository and compiles against it with Java 21.
       - name: Build plugin
         run: ./gradlew buildPlugin
 
