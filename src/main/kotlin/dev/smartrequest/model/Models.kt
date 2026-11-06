@@ -25,6 +25,7 @@ class SmartRequestState {
 
     var groups: MutableList<RequestGroup> = mutableListOf()
     var scenarios: MutableList<ScenarioConfig> = mutableListOf()
+    var functions: MutableList<FunctionDefinition> = mutableListOf()
     var history: MutableList<RequestHistoryEntry> = mutableListOf()
     var timeoutMs: Int = DEFAULT_TIMEOUT_MS
     var followRedirects: Boolean = true
@@ -43,6 +44,9 @@ class SmartRequestState {
         // Project-wide globals from older versions belong to whichever environment was active.
         migrateLegacyGlobals()
         scenarios.forEach { it.normalize() }
+        functions.forEach { it.normalize() }
+        val seenFunctions = HashSet<String>()
+        functions.removeAll { !seenFunctions.add(it.name.lowercase()) }
         if (version < CURRENT_VERSION) version = CURRENT_VERSION
         if (timeoutMs !in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS) timeoutMs = DEFAULT_TIMEOUT_MS
 
@@ -82,7 +86,7 @@ class SmartRequestState {
 
     companion object {
         /** Bumped when [normalize] has to rewrite older state; see [ScenarioConfig]. */
-        const val CURRENT_VERSION = 3
+        const val CURRENT_VERSION = 4
         const val DEFAULT_TIMEOUT_MS = 30_000
         const val MIN_TIMEOUT_MS = 1_000
         const val MAX_TIMEOUT_MS = 600_000
@@ -103,6 +107,41 @@ class SmartRequestState {
                 }
             )
         }
+    }
+}
+
+/**
+ * A pure macro: `name(parameters) = expression`. The expression may reference its parameters,
+ * string literals and other template functions (built-in or macro); it cannot read the environment
+ * or project state. Macros are stored project-wide in `.idea/smart-request.xml`.
+ */
+class FunctionDefinition {
+    var id: String = UUID.randomUUID().toString()
+    var name: String = ""
+    var description: String = ""
+    var parameters: MutableList<String> = mutableListOf()
+    var expression: String = ""
+
+    fun normalize() {
+        if (id.isBlank()) id = UUID.randomUUID().toString()
+        name = name.trim()
+        if (name.isEmpty()) name = "function"
+        name = name.replace(Regex("[^A-Za-z0-9_]"), "_")
+        if (name.first().isDigit()) name = "_$name"
+        parameters = parameters.map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toMutableList()
+        expression = expression.trim()
+        description = description.trim()
+    }
+
+    fun deepCopy(): FunctionDefinition = FunctionDefinition().also { copy ->
+        copy.id = id
+        copy.name = name
+        copy.description = description
+        copy.parameters = parameters.toMutableList()
+        copy.expression = expression
     }
 }
 

@@ -101,7 +101,7 @@ class VariableTextSupport(
         val text = component.text
         if (text.isEmpty()) return
         val variables = variablesProvider()
-        val analysis = TemplateEngine.analyze(text)
+        val analysis = TemplateEngine.analyze(text, allowUnknownFunctions = true)
         TemplateParser.parse(text).segments.forEach { segment ->
             if (segment.expression == null) return@forEach
             val hasIssue = analysis.issues.any { it.start < segment.end && it.end > segment.start }

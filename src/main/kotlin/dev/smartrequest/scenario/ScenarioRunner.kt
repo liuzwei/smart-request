@@ -14,6 +14,7 @@ import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.model.ScenarioNode
 import dev.smartrequest.model.SmartRequestState
+import dev.smartrequest.template.FunctionRegistry
 import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
@@ -150,6 +151,7 @@ class ScenarioRunHandle internal constructor(
 class ScenarioRunner(
     private val transport: ScenarioTransport,
     private val requests: RequestSource,
+    private val functions: FunctionRegistry = FunctionRegistry.builtIns(),
     private val listener: (ScenarioRunEvent) -> Unit = {}
 ) {
 
@@ -300,7 +302,8 @@ class ScenarioRunner(
                     globalParams = environment.globalParams,
                     timeoutMs = timeoutMs,
                     followRedirects = environment.followRedirects,
-                    variables = values
+                    variables = values,
+                    registry = functions
                 ).request
             } catch (e: RequestBuildException) {
                 failNow(node, e.message ?: "Request could not be prepared")

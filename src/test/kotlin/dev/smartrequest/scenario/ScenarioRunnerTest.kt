@@ -122,6 +122,49 @@ class ScenarioRunnerTest {
         handle.result.get(10, TimeUnit.SECONDS)
 
     @Test
+    fun `a macro transforms a captured value in the next request body`() {
+        request("login", "http://test/login")
+        request("cart", "http://test/cart").apply {
+            method = "POST"
+            bodyType = dev.smartrequest.model.BodyType.JSON.name
+            body = """{"token":"{{bearer(token)}}"}"""
+        }
+        val start = startNode()
+        val login = requestNode(
+            "login-node",
+            "login",
+            outputs = listOf(ResponseExtractor(variable = "token", source = "data.token"))
+        )
+        val cart = requestNode("cart-node", "cart")
+        val end = endNode()
+        val macro = dev.smartrequest.model.FunctionDefinition().apply {
+            name = "bearer"
+            parameters = mutableListOf("value")
+            expression = "concat('Bearer ', base64(value))"
+        }
+        val registry = dev.smartrequest.template.FunctionRegistry.withMacros(listOf(macro))
+        val handle = ScenarioRunner(
+            transport,
+            requestSource,
+            functions = registry
+        ) { events.add(it) }.start(
+            scenario(
+                start, login, cart, end,
+                edges = listOf(edge(start, login), edge(login, cart), edge(cart, end))
+            ),
+            environment()
+        )
+
+        assertEquals("http://test/login", awaitStarted())
+        respond("http://test/login", body = """{"token":"abc"}""")
+        assertEquals("http://test/cart", awaitStarted())
+        assertEquals("""{"token":"Bearer YWJj"}""", prepared.single { it.url == "http://test/cart" }.body)
+        respond("http://test/cart")
+
+        assertEquals(ScenarioRunState.PASSED, awaitResult(handle).state)
+    }
+
+    @Test
     fun `a linear chain passes captured values downstream`() {
         request("login", "http://test/login")
         request("cart", "http://test/cart?token={{token}}")

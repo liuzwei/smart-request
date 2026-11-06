@@ -1,5 +1,6 @@
 package dev.smartrequest.template
 
+import dev.smartrequest.model.FunctionDefinition
 import java.util.Locale
 
 /**
@@ -40,5 +41,24 @@ class FunctionRegistry private constructor(
         fun of(functions: Collection<TemplateFunction>): FunctionRegistry = FunctionRegistry(
             functions.associateBy { it.name.lowercase(Locale.ROOT) }
         )
+
+        /**
+         * Builds a registry containing all built-ins plus the project's pure macros. A macro name
+         * that collides with a built-in is ignored here; the settings validation reports it instead
+         * of silently shadowing a standard function.
+         */
+        fun withMacros(definitions: List<FunctionDefinition>): FunctionRegistry {
+            val functions = LinkedHashMap(
+                BuiltInFunctions.all.associateBy { it.name.lowercase(Locale.ROOT) }
+            )
+            lateinit var registry: FunctionRegistry
+            definitions.forEach { definition ->
+                val key = definition.name.lowercase(Locale.ROOT)
+                if (key.isBlank() || key in functions) return@forEach
+                functions[key] = MacroFunction(definition) { registry }
+            }
+            registry = FunctionRegistry(functions)
+            return registry
+        }
     }
 }

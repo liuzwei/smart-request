@@ -663,7 +663,8 @@ class ScenarioEditorPanel(
             scenario = current,
             requestSource = service::findRequest,
             environmentVariables = VariableResolver.environmentVariables(environment),
-            parameters = parameters
+            parameters = parameters,
+            registry = service.functionRegistry()
         )
     }
 
@@ -811,7 +812,8 @@ class ScenarioEditorPanel(
             requests = { id -> snapshot[id] },
             listener = { event ->
                 ApplicationManager.getApplication().invokeLater { handleRunEvent(event) }
-            }
+            },
+            functions = service.functionRegistry()
         )
 
         lastRun = null

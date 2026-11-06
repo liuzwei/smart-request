@@ -7,11 +7,15 @@ import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import dev.smartrequest.model.EnvironmentConfig
+import dev.smartrequest.model.FunctionDefinition
 import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
 import dev.smartrequest.model.ScenarioConfig
+import dev.smartrequest.template.BuiltInFunctions
+import dev.smartrequest.template.FunctionRegistry
+import dev.smartrequest.template.TemplateEngine
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -151,6 +155,110 @@ class SmartRequestProjectService : PersistentStateComponent<SmartRequestState> {
 
     fun findGroupByName(name: String): RequestGroup? = myState.groups.firstOrNull { it.name == name }
 
+    fun functions(): List<FunctionDefinition> = myState.functions
+
+    /** Built-ins plus the current project's pure macros. */
+    fun functionRegistry(): FunctionRegistry = FunctionRegistry.withMacros(myState.functions)
+
+    /**
+     * Validates a macro before it is saved. Returns a user-facing error, or null when the definition
+     * is usable. The expression may only reference its own parameters, string literals and other
+     * functions; it cannot read the environment or project state.
+     */
+    fun functionError(
+        id: String?,
+        name: String,
+        parameters: List<String>,
+        expression: String
+    ): String? {
+        val trimmedName = name.trim()
+        if (trimmedName.isEmpty()) return "Function name is empty"
+        if (!trimmedName.matches(FUNCTION_NAME)) {
+            return "Function name must start with a letter or '_' and contain only letters, digits and '_'"
+        }
+        if (BuiltInFunctions.all.any { it.name.equals(trimmedName, ignoreCase = true) }) {
+            return "'$trimmedName' is a built-in function; choose another name"
+        }
+        if (myState.functions.any { it.id != id && it.name.equals(trimmedName, ignoreCase = true) }) {
+            return "Another function is already named '$trimmedName'"
+        }
+
+        val cleaned = parameters.map { it.trim() }.filter { it.isNotEmpty() }
+        if (cleaned.size != parameters.count { it.isNotBlank() }) {
+            return "Parameter names cannot be blank"
+        }
+        val invalid = cleaned.firstOrNull { !it.matches(PARAMETER_NAME) }
+        if (invalid != null) {
+            return "Invalid parameter name '$invalid'; use letters, digits and '_'"
+        }
+        if (cleaned.distinct().size != cleaned.size) {
+            return "Parameter names must be unique"
+        }
+        if (expression.isBlank()) return "Expression is empty"
+
+        val candidate = FunctionDefinition().apply {
+            this.id = id ?: UUID.randomUUID().toString()
+            this.name = trimmedName
+            this.parameters = cleaned.toMutableList()
+            this.expression = expression.trim()
+        }
+        val others = myState.functions.filter { it.id != id }
+        val analysis = TemplateEngine.analyze(
+            TemplateEngine.expressionTemplate(candidate.expression),
+            FunctionRegistry.withMacros(others + candidate)
+        )
+        analysis.issues.firstOrNull()?.let { return it.message }
+        val unknown = analysis.variables - cleaned.toSet()
+        if (unknown.isNotEmpty()) {
+            return "Unknown parameter(s): ${unknown.sorted().joinToString(", ")}. " +
+                "A macro may only use its own parameters, literals and other functions."
+        }
+        return null
+    }
+
+    fun addFunction(
+        name: String,
+        parameters: List<String>,
+        expression: String,
+        description: String = ""
+    ): FunctionDefinition? {
+        if (functionError(null, name, parameters, expression) != null) return null
+        val definition = FunctionDefinition().apply {
+            this.name = name.trim()
+            this.parameters = parameters.map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+            this.expression = expression.trim()
+            this.description = description.trim()
+            normalize()
+        }
+        myState.functions.add(definition)
+        notifyChanged()
+        return definition
+    }
+
+    fun updateFunction(
+        id: String,
+        name: String,
+        parameters: List<String>,
+        expression: String,
+        description: String = ""
+    ): Boolean {
+        val definition = myState.functions.firstOrNull { it.id == id } ?: return false
+        if (functionError(id, name, parameters, expression) != null) return false
+        definition.name = name.trim()
+        definition.parameters = parameters.map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+        definition.expression = expression.trim()
+        definition.description = description.trim()
+        definition.normalize()
+        notifyChanged()
+        return true
+    }
+
+    fun removeFunction(id: String) {
+        if (myState.functions.removeIf { it.id == id }) {
+            notifyChanged()
+        }
+    }
+
     fun scenarios(): List<ScenarioConfig> = myState.scenarios
 
     fun scenario(id: String): ScenarioConfig? = myState.scenario(id)
@@ -252,6 +360,9 @@ class SmartRequestProjectService : PersistentStateComponent<SmartRequestState> {
     }
 
     companion object {
+        private val FUNCTION_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
+        private val PARAMETER_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
+
         fun getInstance(project: Project): SmartRequestProjectService = project.service()
     }
 }

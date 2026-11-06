@@ -13,7 +13,7 @@ import java.awt.Font
 object VariableHtml {
 
     fun render(value: String, knownNames: Set<String>, baseColor: Color, font: Font): String {
-        val analysis = TemplateEngine.analyze(value)
+        val analysis = TemplateEngine.analyze(value, allowUnknownFunctions = true)
         val body = StringBuilder()
         TemplateParser.parse(value).segments.forEach { segment ->
             val raw = value.substring(segment.start, segment.end)

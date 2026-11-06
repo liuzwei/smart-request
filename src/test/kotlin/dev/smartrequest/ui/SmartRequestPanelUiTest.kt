@@ -6,6 +6,7 @@ import com.intellij.testFramework.EdtTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.xmlb.XmlSerializer
 import dev.smartrequest.model.EnvironmentConfig
+import dev.smartrequest.model.FunctionDefinition
 import dev.smartrequest.model.SmartRequestState
 import dev.smartrequest.model.KeyValue
 import dev.smartrequest.model.RequestHistoryEntry
@@ -151,6 +152,14 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
             groups.first().requests.first().extractors.add(
                 ResponseExtractor(variable = "token", source = "data.token")
             )
+            functions.add(
+                FunctionDefinition().apply {
+                    name = "bearer"
+                    parameters = mutableListOf("value")
+                    expression = "concat('Bearer ', base64(value))"
+                    description = "Authorization value"
+                }
+            )
             history.add(
                 RequestHistoryEntry(
                     timestamp = 1_700_000_000_000,
@@ -182,6 +191,11 @@ class SmartRequestPanelUiTest : BasePlatformTestCase() {
         assertEquals(200, restored.history.first().statusCode)
         assertEquals("42", restored.history.first().request.pathParams.first().value)
         assertEquals(state.environments.first().id, restored.environments.first().id)
+        val restoredFunction = restored.functions.single()
+        assertEquals("bearer", restoredFunction.name)
+        assertEquals(listOf("value"), restoredFunction.parameters)
+        assertEquals("concat('Bearer ', base64(value))", restoredFunction.expression)
+        assertEquals("Authorization value", restoredFunction.description)
     }
 
     fun testScenarioRoundTripsThroughXmlSerializer() {

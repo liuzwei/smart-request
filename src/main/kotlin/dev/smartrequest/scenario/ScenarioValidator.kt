@@ -3,6 +3,7 @@ package dev.smartrequest.scenario
 import dev.smartrequest.extract.JsonPath
 import dev.smartrequest.extract.PathSyntaxException
 import dev.smartrequest.extract.ResponseExtractorEngine
+import dev.smartrequest.template.FunctionRegistry
 import dev.smartrequest.template.TemplateEngine
 import dev.smartrequest.model.BodyType
 import dev.smartrequest.model.HttpRequestConfig
@@ -44,7 +45,8 @@ object ScenarioValidator {
         scenario: ScenarioConfig,
         requestSource: (String) -> HttpRequestConfig?,
         environmentVariables: Map<String, String> = emptyMap(),
-        parameters: Map<String, String> = emptyMap()
+        parameters: Map<String, String> = emptyMap(),
+        registry: FunctionRegistry = FunctionRegistry.builtIns()
     ): Report {
         val problems = mutableListOf<Problem>()
 
@@ -200,6 +202,7 @@ object ScenarioValidator {
                 environmentVariables = environmentVariables,
                 parameterKeys = parameterKeys,
                 missingVariables = missingVariables,
+                registry = registry,
                 error = ::error,
                 warn = ::warn
             )
@@ -268,6 +271,7 @@ object ScenarioValidator {
         environmentVariables: Map<String, String>,
         parameterKeys: Set<String>,
         missingVariables: MutableSet<String>,
+        registry: FunctionRegistry,
         error: (String, String?, String?) -> Unit,
         warn: (String, String?, String?) -> Unit
     ) {
@@ -302,7 +306,7 @@ object ScenarioValidator {
         requestNodes.forEach { node ->
             val request = requestFor(node) ?: return@forEach
             requestTexts(request)
-                .flatMap { TemplateEngine.analyze(it).issues }
+                .flatMap { TemplateEngine.analyze(it, registry).issues }
                 .map { it.message }
                 .distinct()
                 .forEach { message ->
@@ -312,7 +316,7 @@ object ScenarioValidator {
                         null
                     )
                 }
-            val needed = neededVariables(request)
+            val needed = neededVariables(request, registry)
             val missing = needed -
                     available[node.id].orEmpty() -
                     environmentVariables.keys -
@@ -376,8 +380,13 @@ object ScenarioValidator {
     }
 
     /** Every `{{name}}` that appears in the request, regardless of whether it currently resolves. */
-    fun neededVariables(request: HttpRequestConfig): Set<String> =
-        requestTexts(request).flatMapTo(LinkedHashSet()) { TemplateEngine.analyze(it).variables }
+    fun neededVariables(
+        request: HttpRequestConfig,
+        registry: FunctionRegistry = FunctionRegistry.builtIns()
+    ): Set<String> =
+        requestTexts(request).flatMapTo(LinkedHashSet()) {
+            TemplateEngine.analyze(it, registry).variables
+        }
 
     private fun requestTexts(request: HttpRequestConfig): List<String> {
         val texts = ArrayList<String>()

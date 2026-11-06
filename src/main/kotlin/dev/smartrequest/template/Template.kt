@@ -331,13 +331,27 @@ object TemplateEngine {
     const val MAX_OUTPUT_LENGTH = 1_000_000
 
     /**
+     * A macro stores a bare expression such as `concat('Bearer ', token)`. Wrapping it in `{{...}}`
+     * lets the same parser, analyzer and evaluator handle both request templates and macros.
+     */
+    fun expressionTemplate(expression: String): String {
+        val trimmed = expression.trim()
+        return if (trimmed.startsWith("{{") && trimmed.endsWith("}}")) {
+            trimmed
+        } else {
+            "{{$trimmed}}"
+        }
+    }
+
+    /**
      * Parses and statically analyzes a template. Used by validation and the editor highlighter.
      * It never evaluates functions; it only checks syntax, names, arity and collects variable
      * references (which are the dependencies used by the scenario data-flow validator).
      */
     fun analyze(
         template: String,
-        registry: FunctionRegistry = FunctionRegistry.builtIns()
+        registry: FunctionRegistry = FunctionRegistry.builtIns(),
+        allowUnknownFunctions: Boolean = false
     ): TemplateAnalysis {
         val parsed = TemplateParser.parse(template)
         val references = ArrayList<TemplateReference>()
@@ -357,12 +371,14 @@ object TemplateEngine {
                     functions += normalized
                     val function = registry.find(expression.name)
                     if (function == null) {
-                        issues += TemplateIssue(
-                            expression.start,
-                            expression.end,
-                            "Unknown function '${expression.name}'",
-                            TemplateIssueKind.UNKNOWN_FUNCTION
-                        )
+                        if (!allowUnknownFunctions) {
+                            issues += TemplateIssue(
+                                expression.start,
+                                expression.end,
+                                "Unknown function '${expression.name}'",
+                                TemplateIssueKind.UNKNOWN_FUNCTION
+                            )
+                        }
                     } else if (expression.args.size !in function.minArgs..function.maxArgs) {
                         issues += TemplateIssue(
                             expression.start,

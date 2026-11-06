@@ -194,7 +194,8 @@ class ScenarioRunDialog(
         scenario = scenario,
         requestSource = service::findRequest,
         environmentVariables = VariableResolver.environmentVariables(environment),
-        parameters = values
+        parameters = values,
+        registry = service.functionRegistry()
     )
 
     private fun updateLabels() {

@@ -43,6 +43,7 @@ import dev.smartrequest.spring.SpringEndpointScanner
 import dev.smartrequest.spring.SpringScanResult
 import dev.smartrequest.spring.SpringRequestsImportedListener
 import dev.smartrequest.ui.dialogs.EnvironmentDialog
+import dev.smartrequest.ui.dialogs.FunctionsDialog
 import dev.smartrequest.ui.dialogs.GlobalSettingsDialog
 import dev.smartrequest.ui.dialogs.HistoryDialog
 import java.awt.BorderLayout
@@ -202,6 +203,9 @@ class SmartRequestPanel(
             add(flatButton("", AllIcons.Vcs.History) { openHistoryDialog() }.apply {
                 toolTipText = "Request history"
                 preferredSize = Dimension(JBUI.scale(30), JBUI.scale(28))
+            })
+            add(flatButton("Functions", null) { openFunctionsDialog() }.apply {
+                toolTipText = "Define pure template functions"
             })
             add(flatButton("Settings", null) { openGlobalSettings() }.apply {
                 toolTipText = "Request timeout and redirects"
@@ -513,7 +517,8 @@ class SmartRequestPanel(
                 globalHeaders = environment?.globalHeaders.orEmpty(),
                 globalParams = environment?.globalParams.orEmpty(),
                 timeoutMs = state.timeoutMs,
-                followRedirects = state.followRedirects
+                followRedirects = state.followRedirects,
+                registry = service.functionRegistry()
             )
         } catch (e: RequestBuildException) {
             notify(e.message ?: "Request could not be prepared", NotificationType.WARNING)
@@ -535,6 +540,10 @@ class SmartRequestPanel(
             refreshGlobals()
             editorPanel.refreshVariables()
         }
+    }
+
+    private fun openFunctionsDialog() {
+        FunctionsDialog(project, service).show()
     }
 
     private fun openGlobalSettings() {
@@ -584,7 +593,8 @@ class SmartRequestPanel(
                 globalHeaders = environment?.globalHeaders.orEmpty(),
                 globalParams = environment?.globalParams.orEmpty(),
                 timeoutMs = state.timeoutMs,
-                followRedirects = state.followRedirects
+                followRedirects = state.followRedirects,
+                registry = service.functionRegistry()
             )
         } catch (e: RequestBuildException) {
             editorPanel.setStatusWarning(e.message)

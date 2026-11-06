@@ -119,4 +119,49 @@ class TemplateEngineTest {
         assertTrue(analysis.issues.isEmpty())
         assertFalse(analysis.variables.isEmpty())
     }
+
+    @Test
+    fun `pure macros can be composed`() {
+        val definition = dev.smartrequest.model.FunctionDefinition().apply {
+            name = "bearer"
+            parameters = mutableListOf("value")
+            expression = "concat('Bearer ', base64(value))"
+        }
+        val registry = FunctionRegistry.withMacros(listOf(definition))
+        val result = TemplateEngine.resolve("{{bearer(token)}}", mapOf("token" to "hello"), registry)
+        assertEquals("Bearer aGVsbG8=", result.text)
+        assertTrue(result.errors.isEmpty())
+        assertTrue(result.unresolved.isEmpty())
+    }
+
+    @Test
+    fun `macros can call other macros`() {
+        val encode = dev.smartrequest.model.FunctionDefinition().apply {
+            name = "encode"
+            parameters = mutableListOf("value")
+            expression = "base64(value)"
+        }
+        val bearer = dev.smartrequest.model.FunctionDefinition().apply {
+            name = "bearer"
+            parameters = mutableListOf("value")
+            expression = "concat('Bearer ', encode(value))"
+        }
+        val registry = FunctionRegistry.withMacros(listOf(encode, bearer))
+        assertEquals(
+            "Bearer aGVsbG8=",
+            TemplateEngine.resolve("{{bearer(token)}}", mapOf("token" to "hello"), registry).text
+        )
+    }
+
+    @Test
+    fun `macro recursion is bounded`() {
+        val loop = dev.smartrequest.model.FunctionDefinition().apply {
+            name = "loop"
+            parameters = mutableListOf("value")
+            expression = "loop(value)"
+        }
+        val registry = FunctionRegistry.withMacros(listOf(loop))
+        val result = TemplateEngine.resolve("{{loop(x)}}", mapOf("x" to "1"), registry)
+        assertTrue(result.errors.any { it.contains("maximum call depth") })
+    }
 }

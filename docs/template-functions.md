@@ -156,6 +156,40 @@ Hash a request body with HMAC:
 {"digest":"{{hmacSha256(hmacKey, payload)}}"}
 ```
 
+## Custom pure macros
+
+The toolbar's `Functions` button opens the project-level function catalog. A macro has a name, a
+comma-separated parameter list and a bare expression:
+
+```text
+Name:        bearer
+Parameters:  value
+Expression:  concat('Bearer ', base64(value))
+```
+
+Use it like a built-in:
+
+```json
+{"authorization":"{{bearer(token)}}"}
+```
+
+Rules:
+
+- A macro may use its parameters, string literals, built-ins and other macros. It **cannot** read
+  environment variables or project state; pass values in as arguments.
+- Parameter names are referenced as `{{value}}` inside the expression. The expression field is
+  stored without the surrounding `{{...}}`.
+- Function and parameter names must match `[A-Za-z_][A-Za-z0-9_]*`; names are unique
+  case-insensitively; a macro may not shadow a built-in.
+- Recursion is limited to 20 nested macro calls; accidental cycles fail with a clear error.
+- Macros are stored in `.idea/smart-request.xml` and are therefore project-level, not
+  environment-specific.
+- Macro definitions are validated when saved: syntax, unknown functions, arity, unknown parameters
+  and duplicate names are rejected.
+- Scenario JSON export currently exports requests and scenarios, not project function definitions;
+  importing a scenario that uses a macro into a project without that macro will fail validation.
+  Built-ins always travel with the plugin.
+
 ## Where functions run
 
 | Location | Resolved by |
@@ -171,9 +205,7 @@ named `base64(token)`, so an upstream capture is recognized correctly.
 
 ## Limitations
 
-- Custom pure-macro definitions are a separate next step; the built-in catalog currently covers the
-  common encodings, hashes, HMAC and RSA operations.
-- No loops, conditions, arithmetic or arbitrary scripting.
+- No loops, conditions, arithmetic or arbitrary scripting; macros are pure expressions only.
 - A function result is inserted as text. When placing a value inside a JSON string, quote it and use
   `jsonEscape` if the value may contain quotes or backslashes. Base64 and hex results are safe.
 - `urlencode` is for text contexts. Query parameter values are encoded by the URL builder, so do not
