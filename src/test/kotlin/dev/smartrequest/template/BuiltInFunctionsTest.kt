@@ -57,6 +57,13 @@ class BuiltInFunctionsTest {
     }
 
     @Test
+    fun `ohDaveRsa matches the legacy login sample`() {
+        val modulus = "cf23d69a983d8c6a6bf09cbc03828f1c89e13f61183eb34268c5746dc75f46438c2ebf3988e7445b6218e88c8256089ae4231cbe626572cb6270d1b7d5c68791c41dfbdd69df8e0ddae2d96e3b26649ed07a7e4d3983228a08c1c65b376b6fcab97cc89f96ac316e550565582f3dfc48113bac8e99d4caa6aaf3e3c3f69541a5"
+        val expected = "7606d2a97a80acc4ebdd525997b83792422ea1e120fe57bc277bca92461421f6a5e474359b2e1c2ffa11f1e982c5d9ed1ed4c2eb2bed760ef7fe8ba242e3be1f88081587c5389427f364cb35a33b7241b14330c32e8894b570638d71bf0bf2f75668d65247bc183a5736bd4118c96941d0a7f8bdbd6417b3c84e2c33ff421974"
+        assertEquals(expected, invoke("ohDaveRsa", "654321", "10001", modulus))
+    }
+
+    @Test
     fun `rsa encrypts and signs with PKCS8 and X509 keys`() {
         val keyPair = keyPair()
         val publicPem = pem("PUBLIC KEY", keyPair.public.encoded)

@@ -81,6 +81,7 @@ object BuiltInFunctions {
             Base64.getEncoder().encodeToString(hmac("HmacSHA256", args[0], args[1]))
         })
         addAll(RsaFunctions.all)
+        addAll(OhDaveFunctions.all)
     }
 
     private fun function(

@@ -15,6 +15,9 @@
     `trim`/`length`/`replace`/`default`/`substring`/`jsonEscape`。
   - 内置 RSA：`rsaEncrypt`（OAEP-SHA256）、`rsaEncryptPkcs1`、`rsaDecrypt`、`rsaDecryptPkcs1`、
     `rsaSign`（SHA256withRSA）、`rsaVerify`；支持 PKCS#8/X.509 和旧式 PKCS#1 PEM 密钥。
+  - 旧版 `OhDave` RSA：`ohDaveRsa(value, exponent, modulus)`，按 f2eweb/`user_ag` 登录的分块
+    raw RSA + hex 格式实现；密码反转后用 `ohDaveRsa(reverse(password), exponent, modulus)`，
+    不要使用标准 `rsaEncrypt`/`rsaEncryptPkcs1`，也不要用 `encoded` 代替 `exponent`/`modulus`。
   - 纯宏：工具栏 `Functions` 里定义名称、参数和表达式，例如
     `bearer(value) = concat('Bearer ', base64(value))`，请求里用 `{{bearer(token)}}`；
     宏只能使用参数、字面量和其他函数，不能读环境变量；保存时校验语法、未知函数、参数个数和重名，

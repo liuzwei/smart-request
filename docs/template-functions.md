@@ -116,6 +116,30 @@ Then:
 RSA key sizes 1024–8192 bits are accepted. OAEP uses SHA-256 with MGF1-SHA256. Signing and
 verification use SHA-256. Output is standard Base64.
 
+### Legacy OhDave RSA (f2eweb / user_ag login)
+
+Some portal login endpoints do **not** use standard RSA/PKCS#1/OAEP. They use the legacy
+"ohDave" block format: reverse the password, pack pairs of characters into 16-bit digits, split
+into `2 * biHighIndex(modulus)`-character blocks, pad with zero characters, apply raw `modPow`, and
+write each block as zero-padded lowercase hex separated by spaces.
+
+Use the key's `exponent` and `modulus` **hex** fields, not the Base64 `encoded` field:
+
+```json
+{
+  "loginName": "{{base64(base64(username))}}",
+  "password": "{{ohDaveRsa(reverse(password), exponent, modulus)}}"
+}
+```
+
+- `exponent` is usually `10001`; `modulus` is the long hex string returned next to it.
+- For a 1024-bit key and a 6-character password the result is 256 lowercase hex characters, which
+  matches the browser's `7606...` sample exactly.
+- `ohDaveRsa` is deterministic raw RSA; do not use `rsaEncrypt` or `rsaEncryptPkcs1` for this
+  endpoint, they produce standard padded ciphertext that the legacy server cannot decode.
+- The key endpoint may generate a new key pair on every call. Fetch it immediately before login
+  and use that response's `exponent`/`modulus`; do not reuse a copied key.
+
 **Security notes**
 
 - Base64, URL encoding and hex are encodings, not encryption; do not use them to protect secrets.
