@@ -416,7 +416,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（359 个）：
+当前测试覆盖（363 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -430,7 +430,8 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 响应提取：JSON 路径求值（嵌套、下标、负下标、括号 key、null、缺失、非 JSON、大整数精度）、提取引擎（新增/更新/重新启用/失败不覆盖/headers/status/派生变量名）、两个 Tab 的计数与结果展示
 - Spring 路径拼接、路径正则清理
 - 用 PSI 扫描真实的 `@RestController` / `@RequestMapping` / `@GetMapping` 注解结构
-- 从方法生成请求：Method/URL/Path 参数/`@RequestParam`/`@RequestBody`/Swagger summary
+- 从方法生成请求：Method/URL/Path 参数/`@RequestParam`/`@RequestBody`/Swagger summary；没有显式 `defaultValue`
+  的参数生成空值（不会把 Spring 的 `DEFAULT_NONE` 哨兵写进参数）
 - 从 DTO 字段生成 Body：嵌套对象、集合、枚举、Swagger example/name、从查询参数生成 JSON
 - cURL 生成：Linux/PowerShell、单引号转义、HEAD、重定向参数
 - 响应 JSON 编辑器：折叠/展开、搜索高亮与 `1/N` 计数

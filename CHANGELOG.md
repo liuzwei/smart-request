@@ -3,6 +3,15 @@
 本项目的重要变更都会记录在这里，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.2.2] - 2026-11-10
+
+### Fixed
+
+- 从 Controller 的 Gutter 图标生成请求时，没有显式写 `defaultValue` 的 `@RequestParam` 会把 Spring 的
+  `ValueConstants.DEFAULT_NONE` 哨兵（`\n\t\t\n\t\t\n\uE000\uE001\uE002\n\t\t\t\t\n`）当作默认值写进
+  Params。这三个私用区字符在部分字体里显示成放大镜/对号/方块，前后还带着大量空白，发送时会作为真实参数值
+  影响查询。现在生成请求时会识别并忽略这个哨兵；打开旧项目时也会自动清理已经保存到 Params 和 URL 里的值。
+
 ## [1.2.1] - 2026-11-10
 
 ### Added
