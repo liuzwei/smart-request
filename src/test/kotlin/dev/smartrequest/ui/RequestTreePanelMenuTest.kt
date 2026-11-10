@@ -101,6 +101,54 @@ class RequestTreePanelMenuTest : BasePlatformTestCase() {
         assertTrue(labels.any { it.startsWith("New Group") })
     }
 
+    fun testGoToSourceIsOnlyOfferedForSpringRequests() {
+        val service = project.service<SmartRequestProjectService>()
+        val request = resetGroups(service)
+        var opened: HttpRequestConfig? = null
+
+        val panel = EdtTestUtil.runInEdtAndGet<RequestTreePanel, RuntimeException> {
+            newPanel(service) { opened = it }
+        }
+        val plainLabels = EdtTestUtil.runInEdtAndGet<List<String>, RuntimeException> {
+            panel.buildRequestMenu(request).components
+                .filterIsInstance<JMenuItem>()
+                .map { it.text }
+        }
+        assertFalse(plainLabels.contains("Go to Source"))
+
+        request.springKey = "com.example.WorkshopController#candidateMembers:GET:/workshop/{id}/members"
+        val springMenu = EdtTestUtil.runInEdtAndGet<JPopupMenu, RuntimeException> {
+            panel.buildRequestMenu(request)
+        }
+        val sourceItem = springMenu.components
+            .filterIsInstance<JMenuItem>()
+            .firstOrNull { it.text == "Go to Source" }
+            ?: error("Go to Source missing for a Spring request")
+
+        EdtTestUtil.runInEdtAndWait<RuntimeException> { sourceItem.doClick() }
+        assertSame(request, opened)
+    }
+
+    private fun newPanel(
+        service: SmartRequestProjectService,
+        onGoToSource: (HttpRequestConfig) -> Unit = {}
+    ): RequestTreePanel = RequestTreePanel(
+        service = service,
+        onSelect = {},
+        onCreateRequest = {},
+        onCreateGroup = {},
+        onDeleteRequest = {},
+        onDeleteGroup = {},
+        onRenameRequest = {},
+        onRenameGroup = {},
+        onDuplicateRequest = {},
+        onImportSpringIntoGroup = {},
+        onCopyCurl = { _, _ -> },
+        onMoveRequest = { _, _ -> },
+        onMoveRequestToNewGroup = {},
+        onGoToSource = onGoToSource
+    )
+
     private fun resetGroups(service: SmartRequestProjectService): HttpRequestConfig {
         val state = service.state()
         state.groups.clear()

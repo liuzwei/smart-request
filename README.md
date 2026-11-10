@@ -41,6 +41,8 @@
 - 项目级请求树，支持一级分组（Group）。
 - 新建、重命名、复制、删除请求；新建、重命名、删除分组。
 - 右键请求 → `Move to Group` 可把请求移动到其他分组；也可以选择 `New Group…` 新建分组后直接移入。
+- 拖拽排序：在请求树里拖动分组可以调整分组顺序；拖动请求可以调整请求顺序，拖到另一个请求的上半/下半部分会插入到它前面/后面；把请求拖到分组行上会移动到该分组末尾。
+- 从 Spring 导入的请求右键有 `Go to Source`，直接跳到生成它的 Controller 方法；手工创建的请求不显示这一项。
 - 请求编辑区：名称、HTTP Method、URL、Query Params、Path Params、Headers、Body。
 - 支持 `GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS`。
 - 表格行支持启用/禁用，禁用行不会发送。
@@ -52,6 +54,7 @@
 - 在 URL Path 中写 `{studioId}`、`{id}` 这类占位符，插件会自动识别。
 - 新增独立的 `Path Params` Tab，只允许编辑值，参数名锁定为 URL 中的占位符。
 - URL 变化时自动同步：新增占位符会新增一行，删除占位符会移除旧行，同名参数保留已填的值。
+- 在 Params 表格里改参数、URL 被实时重写时，Path Params 不会跟着被清空；占位符暂时从 URL 里消失再恢复，之前填的值仍然保留。
 - 发送前把值替换进路径，并按 **单个路径段** 做 URL 编码：
   - `a/b c` → `a%2Fb%20c`
 - 路径参数值也支持环境变量，例如 `{id}` 的值为 `{{userId}}`。
@@ -428,7 +431,7 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 .\gradlew.bat test -PlocalIdePath="C:\Program Files\JetBrains\IntelliJ IDEA OSS"
 ```
 
-当前测试覆盖（340 个）：
+当前测试覆盖（359 个）：
 
 - 变量解析、递归、未知变量、循环
 - URL 拼接、编码、已有 Query、非法 URL
@@ -470,8 +473,9 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 场景响应查看器：运行结束后选中步骤显示对应响应、切换步骤更新内容
 - 请求拖拽：拖拽载荷编码/解码、拖到画布生成指定位置的步骤并进入撤销栈
 - 场景导出/导入 UI：工具窗导出 JSON、删除后导入、新场景/新请求、`expectStatus`/`retries` 保留
-- 请求在分组间移动：追加顺序、空分组、同一分组/无效 ID 的空操作、监听通知
-- 请求右键菜单 `Move to Group` 的子菜单内容与回调
+- 请求在分组间移动：追加顺序、按索引插入、同组前移/后移、空分组、同一分组/无效 ID 的空操作、监听通知
+- 分组拖拽排序：分组列表按索引移动、移动到开头/末尾、原位不动
+- 请求右键菜单 `Move to Group` 的子菜单内容与回调、Spring 请求的 `Go to Source` 项与手工请求不显示
 - 变量高亮、Path 参数自动同步
 - 表格列宽：3:4 比例、随宽度伸缩、窄窗口最小宽度、铺满整个表格宽度
 - 表格交互：单击进入编辑态、编辑器在表格布局变化时不被关闭、单击勾选框切换启用、全局行只读、新增行可立即编辑
@@ -480,7 +484,8 @@ $env:JAVA_HOME = "C:\Program Files\JetBrains\IntelliJ IDEA OSS\jbr"
 - 单元格变量补全：请求补全后单元格仍保持焦点、编辑器被关闭时已输入文本不丢失
 - URL 与 Params 双向同步：URL 改表格跟着变、表格改 URL 跟着变、取消勾选保留行、旧数据合并、重复参数不重复发送
 - Query 字符串工具：解析/编码/解码、重复 key、无值 key、fragment、`{{变量}}` 不被编码、往返一致
-- Path Params 表格的 3:7 列宽、只有值列可编辑、从 URL 识别参数
+- Path Params 表格的 3:7 列宽、只有值列可编辑、从 URL 识别参数、占位符暂时消失再恢复时保留已填的值
+- 在 Params 表格里改值不会清空 Path Params 的行和值，URL 的 path 部分保持不变
 - 切换请求时变量输入框文本替换的边界回归测试
 - 在真实 IntelliJ 项目中创建并销毁整个工具窗口、History 对话框和 Environments 对话框的 UI smoke test
 
@@ -736,7 +741,7 @@ src/main/kotlin/dev/smartrequest/
 
 ### P0：把日常使用体验补齐
 
-- 请求树搜索、过滤、嵌套分组、拖拽排序
+- 请求树搜索、过滤、嵌套分组
 - 表格行拖拽排序、从剪贴板批量粘贴 `Key: Value`
 - 变量补全展示变量值/描述，支持路径参数和函数变量
 - 请求级超时、环境级 Header、环境复制/导入导出

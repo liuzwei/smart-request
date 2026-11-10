@@ -126,6 +126,46 @@ class SmartRequestProjectService : PersistentStateComponent<SmartRequestState> {
         return true
     }
 
+    /**
+     * Moves a request to [index] inside [targetGroupId], which is how drag-and-drop reordering is
+     * applied. [index] is interpreted against the target list before the request is removed from it,
+     * so moving a row down can pass the index of the row it should end up after.
+     */
+    fun moveRequestToIndex(requestId: String, targetGroupId: String, index: Int): Boolean {
+        val target = findGroup(targetGroupId) ?: return false
+        val source = groupOf(requestId) ?: return false
+        val request = source.requests.firstOrNull { it.id == requestId } ?: return false
+        val oldIndex = source.requests.indexOf(request)
+        var insertion = index.coerceIn(0, target.requests.size)
+        if (source.id == target.id) {
+            if (insertion > oldIndex) insertion--
+            if (insertion == oldIndex) return false
+        }
+        source.requests.removeAt(oldIndex)
+        target.requests.add(insertion, request)
+        target.expanded = true
+        notifyChanged()
+        return true
+    }
+
+    /**
+     * Moves [groupId] to [index] in the group list. [index] is the desired position in the list as it
+     * looks before the move, so callers can pass the index of the group to insert before (or +1 to
+     * insert after).
+     */
+    fun moveGroup(groupId: String, index: Int): Boolean {
+        val group = findGroup(groupId) ?: return false
+        val current = myState.groups.indexOf(group)
+        if (current < 0) return false
+        var insertion = index.coerceIn(0, myState.groups.size)
+        if (insertion > current) insertion--
+        if (insertion == current) return false
+        myState.groups.removeAt(current)
+        myState.groups.add(insertion, group)
+        notifyChanged()
+        return true
+    }
+
     fun duplicateRequest(requestId: String): HttpRequestConfig? {
         val group = groupOf(requestId) ?: return null
         val source = group.requests.firstOrNull { it.id == requestId } ?: return null

@@ -40,8 +40,9 @@ import dev.smartrequest.scenario.ScenarioTopics
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.spring.SmartRequestTopics
 import dev.smartrequest.spring.SpringEndpointScanner
-import dev.smartrequest.spring.SpringScanResult
 import dev.smartrequest.spring.SpringRequestsImportedListener
+import dev.smartrequest.spring.SpringScanResult
+import dev.smartrequest.spring.SpringSourceLocator
 import dev.smartrequest.ui.dialogs.EnvironmentDialog
 import dev.smartrequest.ui.dialogs.FunctionsDialog
 import dev.smartrequest.ui.dialogs.GlobalSettingsDialog
@@ -108,7 +109,8 @@ class SmartRequestPanel(
             onImportSpringIntoGroup = { importSpringEndpoints(it.id) },
             onCopyCurl = { request, format -> copyCurl(request, format) },
             onMoveRequest = { request, group -> moveRequest(request, group) },
-            onMoveRequestToNewGroup = { moveRequestToNewGroup(it) }
+            onMoveRequestToNewGroup = { moveRequestToNewGroup(it) },
+            onGoToSource = { goToSource(it) }
         )
         editorPanel = RequestEditorPanel(
             onSend = { sendRequest(it) },
@@ -505,6 +507,27 @@ class SmartRequestPanel(
         val group = service.addGroup(service.uniqueGroupName(name))
         service.moveRequest(request.id, group.id)
         treePanel.rebuild(request.id)
+    }
+
+    /**
+     * Opens the Spring controller method that originally produced [request], if it still exists.
+     * Requests imported from the gutter or from the Spring scan carry a stable `springKey`; requests
+     * created by hand have none and do not show the action at all.
+     */
+    private fun goToSource(request: HttpRequestConfig) {
+        val key = request.springKey ?: return
+        val method = ReadAction.compute<com.intellij.psi.PsiMethod?, RuntimeException> {
+            SpringSourceLocator.findMethod(project, key)
+        }
+        val file = method?.containingFile?.virtualFile
+        if (method == null || file == null || !method.isPhysical) {
+            notify(
+                "Source for '${request.name}' was not found. The controller may have been renamed or removed.",
+                NotificationType.WARNING
+            )
+            return
+        }
+        com.intellij.openapi.fileEditor.OpenFileDescriptor(project, file, method.textOffset).navigate(true)
     }
 
     private fun copyCurl(request: HttpRequestConfig, format: CurlFormat) {

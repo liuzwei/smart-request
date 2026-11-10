@@ -36,6 +36,15 @@ class PathParameterPanel(
 
     private var request: HttpRequestConfig? = null
     private val model = Model()
+
+    /**
+     * Last value seen for every placeholder of the bound request. The URL can be temporarily
+     * incomplete while the user edits it (and it is rewritten on every keystroke in the Params
+     * table), so a placeholder that disappears from the URL for a moment must not lose the value
+     * the user already typed.
+     */
+    private val rememberedValues = LinkedHashMap<String, String>()
+
     private val table: JBTable = object : ProportionalTable(model) {
         override fun computeWidths(tableWidth: Int): List<Int> = computeColumnWidths(tableWidth)
     }
@@ -73,15 +82,28 @@ class PathParameterPanel(
 
     fun bind(request: HttpRequestConfig) {
         this.request = request
-        syncFromUrl(request.url)
+        rememberedValues.clear()
+        syncFromUrl(request.url, force = true)
     }
 
     fun syncFromUrl(url: String) {
+        syncFromUrl(url, force = false)
+    }
+
+    private fun syncFromUrl(url: String, force: Boolean) {
         val request = request ?: return
         val names = PathParameterResolver.detectNames(url)
         val previous = request.pathParams.associateBy { it.key }
         val next = names.map { name ->
-            KeyValue.of(name, previous[name]?.value.orEmpty())
+            KeyValue.of(name, previous[name]?.value ?: rememberedValues[name].orEmpty())
+        }
+        // Keep the values of placeholders that are currently missing from the URL: a transient
+        // empty URL (JTextField.setText removes before it inserts) or an in-progress edit must not
+        // wipe what the user typed.
+        previous.forEach { (name, parameter) -> rememberedValues[name] = parameter.value }
+        next.forEach { rememberedValues[it.key] = it.value }
+        if (!force && request.pathParams.map { it.key to it.value } == next.map { it.key to it.value }) {
+            return
         }
         request.pathParams.clear()
         request.pathParams.addAll(next)
@@ -90,6 +112,11 @@ class PathParameterPanel(
     }
 
     fun count(): Int = model.rowCount
+
+    /** Test hook: writes a value the same way the inline editor does. */
+    internal fun setPathValue(row: Int, value: String) {
+        model.setValueAt(value, row, VALUE_COLUMN)
+    }
 
     fun commitPendingEdit() {
         if (table.isEditing) {

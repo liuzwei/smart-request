@@ -39,4 +39,22 @@ class PathParameterPanelTest : BasePlatformTestCase() {
 
         assertEquals(2, count)
     }
+
+    fun testValueSurvivesATemporarilyMissingPlaceholder() {
+        val (first, afterRemoval, afterRestore) = EdtTestUtil.runInEdtAndGet<Triple<Int, Int, List<Pair<String, String>>>, RuntimeException> {
+            val panel = PathParameterPanel(variablesProvider = { emptyMap() })
+            val request = HttpRequestConfig(url = "{{baseUrl}}/users/{id}")
+            panel.bind(request)
+            panel.setPathValue(0, "1426")
+            val first = panel.count()
+            panel.syncFromUrl("{{baseUrl}}/users")
+            val afterRemoval = panel.count()
+            panel.syncFromUrl("{{baseUrl}}/users/{id}")
+            Triple(first, afterRemoval, request.pathParams.map { it.key to it.value })
+        }
+
+        assertEquals(1, first)
+        assertEquals(0, afterRemoval)
+        assertEquals(listOf("id" to "1426"), afterRestore)
+    }
 }

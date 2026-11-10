@@ -238,7 +238,26 @@ class RequestEditorPanel(
         syncingQuery = true
         try {
             request.url = url
-            if (urlField.text != url) urlField.text = url
+            if (urlField.text != url) {
+                // JTextField.setText() first removes the old document content and then inserts the
+                // new text. Without the syncingQuery guard above, the remove event would run the URL
+                // listener against the temporarily empty field and wipe the Path Params rows.
+                val caret = urlField.caretPosition
+                val selectionStart = urlField.selectionStart
+                val selectionEnd = urlField.selectionEnd
+                urlField.text = url
+                val length = urlField.text.length
+                if (selectionStart != selectionEnd) {
+                    urlField.select(
+                        selectionStart.coerceIn(0, length),
+                        selectionEnd.coerceIn(0, length)
+                    )
+                } else {
+                    urlField.caretPosition = caret.coerceIn(0, length)
+                }
+            }
+            // The URL field listener is suppressed while we update it, so sync the derived path
+            // parameters from the final URL once instead of once per document event.
             pathPanel.syncFromUrl(url)
         } finally {
             syncingQuery = false
@@ -310,7 +329,7 @@ class RequestEditorPanel(
         })
         urlField.document.addDocumentListener(simpleListener {
             val request = current ?: return@simpleListener
-            if (binding) return@simpleListener
+            if (binding || syncingQuery) return@simpleListener
             request.url = urlField.text
             pathPanel.syncFromUrl(request.url)
             syncParamsFromUrl()
@@ -520,6 +539,10 @@ class RequestEditorPanel(
     internal fun useGlobalHeadersCheckbox(): JCheckBox = useGlobalHeadersCheck
 
     internal fun pathParameterCount(): Int = pathPanel.count()
+
+    /** Test hook: the path rows currently bound to the request. */
+    internal fun pathParameterPairs(): List<Pair<String, String>> =
+        current?.pathParams?.map { it.key to it.value }.orEmpty()
 
     private fun updateTabTitles() {
         val request = current ?: return
