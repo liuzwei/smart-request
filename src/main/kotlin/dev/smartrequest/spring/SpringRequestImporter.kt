@@ -79,9 +79,19 @@ object SpringRequestImporter {
         val existingPathValues = target.pathParams.associateBy { it.key }
         target.pathParams.clear()
         imported.pathParams.forEach { pathParam ->
+            val oldValue = existingPathValues[pathParam.key]?.value.orEmpty()
             target.pathParams.add(
-                KeyValue.of(pathParam.key, existingPathValues[pathParam.key]?.value.orEmpty())
+                KeyValue.of(
+                    pathParam.key,
+                    if (SpringRequestValues.isDefaultNone(oldValue)) "" else oldValue
+                )
             )
+        }
+
+        // Requests generated before the DEFAULT_NONE sentinel was filtered kept it as a parameter
+        // value. Re-importing is the natural moment to clean those rows instead of preserving them.
+        target.params.forEach { parameter ->
+            if (SpringRequestValues.isDefaultNone(parameter.value)) parameter.value = ""
         }
 
         val knownParams = target.params.map { it.key }.toMutableSet()
