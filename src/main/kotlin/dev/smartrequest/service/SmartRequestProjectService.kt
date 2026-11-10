@@ -6,6 +6,7 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import dev.smartrequest.http.QueryParams
 import dev.smartrequest.model.EnvironmentConfig
 import dev.smartrequest.model.FunctionDefinition
 import dev.smartrequest.model.SmartRequestState
@@ -13,6 +14,7 @@ import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
 import dev.smartrequest.model.ScenarioConfig
+import dev.smartrequest.spring.SpringRequestValues
 import dev.smartrequest.template.BuiltInFunctions
 import dev.smartrequest.template.FunctionRegistry
 import dev.smartrequest.template.TemplateEngine
@@ -42,6 +44,35 @@ class SmartRequestProjectService : PersistentStateComponent<SmartRequestState> {
     override fun loadState(state: SmartRequestState) {
         myState = state
         myState.normalize()
+        cleanSpringDefaultNoneValues()
+    }
+
+    /**
+     * Spring's `@RequestParam.defaultValue` defaults to `ValueConstants.DEFAULT_NONE`, a sentinel that
+     * used to be copied into generated query parameters. Clear it from requests saved by older
+     * versions, including the encoded copy that may already be part of the URL, so updating the
+     * plugin is enough and the user does not have to regenerate every request.
+     */
+    private fun cleanSpringDefaultNoneValues() {
+        myState.groups.forEach { group ->
+            group.requests.forEach { request ->
+                request.params.forEach { parameter ->
+                    if (SpringRequestValues.isDefaultNone(parameter.value)) parameter.value = ""
+                }
+                request.pathParams.forEach { parameter ->
+                    if (SpringRequestValues.isDefaultNone(parameter.value)) parameter.value = ""
+                }
+                request.headers.forEach { header ->
+                    if (SpringRequestValues.isDefaultNone(header.value)) header.value = ""
+                }
+
+                val pairs = QueryParams.parse(request.url)
+                val cleaned = pairs.filterNot { SpringRequestValues.isDefaultNone(it.second) }
+                if (cleaned.size != pairs.size) {
+                    request.url = QueryParams.replaceQuery(request.url, cleaned)
+                }
+            }
+        }
     }
 
     fun state(): SmartRequestState = myState

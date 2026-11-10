@@ -73,6 +73,15 @@ class SpringEndpointScannerTest : BasePlatformTestCase() {
             """.trimIndent()
         )
         myFixture.addFileToProject(
+            "org/springframework/web/bind/annotation/ValueConstants.java",
+            """
+            package org.springframework.web.bind.annotation;
+            public interface ValueConstants {
+                String DEFAULT_NONE = "\n\t\t\n\t\t\n\uE000\uE001\uE002\n\t\t\t\t\n";
+            }
+            """.trimIndent()
+        )
+        myFixture.addFileToProject(
             "org/springframework/web/bind/annotation/RequestParam.java",
             """
             package org.springframework.web.bind.annotation;
@@ -82,7 +91,7 @@ class SpringEndpointScannerTest : BasePlatformTestCase() {
             public @interface RequestParam {
                 String name() default "";
                 String value() default "";
-                String defaultValue() default "";
+                String defaultValue() default "\n\t\t\n\t\t\n\uE000\uE001\uE002\n\t\t\t\t\n";
             }
             """.trimIndent()
         )
@@ -167,6 +176,20 @@ class SpringEndpointScannerTest : BasePlatformTestCase() {
         assertNotNull(controller)
         val searchController = controller!!
         val method = searchController.findMethodsByName("search", false).first()
+        // Precondition for the DEFAULT_NONE regression: PSI resolves the annotation's default value,
+        // so a parameter without an explicit default appears to have this sentinel.
+        val qAnnotation = method.parameterList.parameters
+            .first { it.name == "q" }
+            .annotations
+            .first()
+        val resolvedDefault = ReadAction.compute<String?, RuntimeException> {
+            JavaPsiFacade.getInstance(project).constantEvaluationHelper
+                .computeConstantExpression(qAnnotation.findAttributeValue("defaultValue")!!) as? String
+        }
+        assertTrue(
+            "resolved default = ${resolvedDefault?.map { it.code }}",
+            SpringRequestValues.isDefaultNone(resolvedDefault.orEmpty())
+        )
         val payload = ReadAction.compute<SpringGenerationPayload?, RuntimeException> {
             SpringRequestFactory.prepareMethod(project, searchController, method)
         }

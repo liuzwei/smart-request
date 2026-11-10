@@ -141,10 +141,7 @@ object SpringRequestFactory {
                 ?: annotation?.let { stringAttribute(project, it, "value") }?.takeIf { it.isNotBlank() }
                 ?: parameter.name
             if (name.isBlank()) return@forEach
-            val defaultValue = annotation?.let { stringAttribute(project, it, "defaultValue") }
-                .orEmpty()
-                .takeUnless { it.isBlank() || it.contains("DEFAULT_NONE") }
-                .orEmpty()
+            val defaultValue = annotation?.let { defaultValue(project, it) }.orEmpty()
             result += KeyValue.of(name, defaultValue)
         }
         return result
@@ -172,6 +169,17 @@ object SpringRequestFactory {
             }
         }
         return method.name
+    }
+
+    /**
+     * The declared default for a query parameter. `findAttributeValue` resolves the annotation's
+     * default when the attribute is not written, and `@RequestParam.defaultValue` defaults to
+     * Spring's `DEFAULT_NONE` sentinel rather than to an empty string (see [SpringRequestValues]).
+     */
+    private fun defaultValue(project: Project, annotation: PsiAnnotation): String {
+        val value = stringAttribute(project, annotation, "defaultValue") ?: return ""
+        if (value.isBlank() || SpringRequestValues.isDefaultNone(value)) return ""
+        return value
     }
 
     private fun stringAttribute(
