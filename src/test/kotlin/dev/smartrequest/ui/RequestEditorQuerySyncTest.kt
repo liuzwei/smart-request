@@ -93,6 +93,39 @@ class RequestEditorQuerySyncTest : BasePlatformTestCase() {
         assertEquals(1, pathCount)
     }
 
+    fun testEditingAParameterValueKeepsThePathParameterValue() {
+        val (count, pathParams) = EdtTestUtil.runInEdtAndGet<Pair<Int, List<Pair<String, String>>>, RuntimeException> {
+            val panel = newPanel()
+            panel.open(
+                HttpRequestConfig(
+                    url = "{{baseUrl}}/workshop/{relationalId}/candidate-members",
+                    pathParams = mutableListOf(KeyValue.of("relationalId", "1426"))
+                )
+            )
+            panel.paramsTable().addRow()
+            panel.paramsTable().commitPendingEdit()
+            panel.paramsTable().setRowValues(0, "page", "2")
+            panel.pathParameterCount() to panel.pathParameterPairs()
+        }
+
+        assertEquals(1, count)
+        assertEquals(listOf("relationalId" to "1426"), pathParams)
+    }
+
+    fun testEditingAParameterValueKeepsTheUrlPath() {
+        val (url, pathCount) = EdtTestUtil.runInEdtAndGet<Pair<String, Int>, RuntimeException> {
+            val panel = newPanel()
+            panel.open(HttpRequestConfig(url = "{{baseUrl}}/workshop/{relationalId}/candidate-members"))
+            panel.paramsTable().addRow()
+            panel.paramsTable().commitPendingEdit()
+            panel.paramsTable().setRowValues(0, "page", "2")
+            panel.urlFieldText() to panel.pathParameterCount()
+        }
+
+        assertEquals("{{baseUrl}}/workshop/{relationalId}/candidate-members?page=2", url)
+        assertEquals(1, pathCount)
+    }
+
     private fun newPanel(): RequestEditorPanel = RequestEditorPanel(
         onSend = {},
         onCancel = {},

@@ -15,6 +15,8 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Point
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
 import java.awt.event.ActionEvent
@@ -22,6 +24,7 @@ import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.AbstractAction
+import javax.swing.DropMode
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JMenu
@@ -49,7 +52,8 @@ class RequestTreePanel(
     private val onImportSpringIntoGroup: (RequestGroup) -> Unit,
     private val onCopyCurl: (HttpRequestConfig, CurlFormat) -> Unit,
     private val onMoveRequest: (HttpRequestConfig, RequestGroup) -> Unit,
-    private val onMoveRequestToNewGroup: (HttpRequestConfig) -> Unit
+    private val onMoveRequestToNewGroup: (HttpRequestConfig) -> Unit,
+    private val onGoToSource: ((HttpRequestConfig) -> Unit)? = null
 ) : JBPanel<RequestTreePanel>(BorderLayout()) {
 
     private val root = DefaultMutableTreeNode()
@@ -117,17 +121,94 @@ class RequestTreePanel(
         rebuild()
     }
 
-    /** Lets the user drag a request onto the scenario canvas to add a step at the drop point. */
+    /**
+     * Enables two drag-and-drop behaviours on the tree:
+     * - dragging a request onto the scenario canvas still creates a step there ([RequestDragData]);
+     * - dragging a request or a group onto another row reorders it ([GroupDragData] marks groups).
+     *
+     * The drop position decides whether the dragged row is inserted before or after the row under
+     * the cursor. Dropping a request on a group row appends it to that group.
+     */
     private fun installDragSupport() {
         tree.dragEnabled = true
+        tree.dropMode = DropMode.ON
         tree.transferHandler = object : TransferHandler() {
-            override fun getSourceActions(component: JComponent?): Int = TransferHandler.COPY
+            override fun getSourceActions(component: JComponent?): Int = COPY or MOVE
 
             override fun createTransferable(component: JComponent?): Transferable? {
-                val request = selectedRequest() ?: return null
-                return StringSelection(RequestDragData.encode(request.id))
+                val node = tree.selectionPath?.lastPathComponent as? DefaultMutableTreeNode ?: return null
+                return when (val data = node.userObject) {
+                    is NodeData.Request -> StringSelection(RequestDragData.encode(data.request.id))
+                    is NodeData.Group -> StringSelection(GroupDragData.encode(data.group.id))
+                    else -> null
+                }
+            }
+
+            override fun canImport(support: TransferHandler.TransferSupport): Boolean {
+                if (!support.isDrop) return false
+                val payload = payloadOf(support) ?: return false
+                val target = targetNodeOf(support)?.userObject as? NodeData ?: return false
+                return when (target) {
+                    is NodeData.Group ->
+                        payload.kind == DragKind.REQUEST || target.group.id != payload.id
+                    is NodeData.Request ->
+                        payload.kind == DragKind.REQUEST && target.request.id != payload.id
+                }
+            }
+
+            override fun importData(support: TransferHandler.TransferSupport): Boolean {
+                val payload = payloadOf(support) ?: return false
+                val targetNode = targetNodeOf(support) ?: return false
+                val dropPoint = (support.dropLocation as? JTree.DropLocation)?.dropPoint ?: return false
+                val after = isBelowRowCenter(dropPoint, targetNode)
+                val moved = when (val target = targetNode.userObject) {
+                    is NodeData.Request -> {
+                        if (payload.kind != DragKind.REQUEST) return false
+                        val group = service.groupOf(target.request.id) ?: return false
+                        val index = group.requests.indexOfFirst { it.id == target.request.id }
+                        if (index < 0) {
+                            false
+                        } else {
+                            service.moveRequestToIndex(payload.id, group.id, index + if (after) 1 else 0)
+                        }
+                    }
+                    is NodeData.Group -> when (payload.kind) {
+                        // A request dropped on the group row joins the end of that group.
+                        DragKind.REQUEST ->
+                            service.moveRequestToIndex(payload.id, target.group.id, target.group.requests.size)
+                        DragKind.GROUP -> {
+                            val index = service.state().groups.indexOfFirst { it.id == target.group.id }
+                            if (index < 0) false else service.moveGroup(payload.id, index + if (after) 1 else 0)
+                        }
+                    }
+                    else -> false
+                }
+                if (moved) rebuild(payload.id)
+                return moved
             }
         }
+    }
+
+    private fun payloadOf(support: TransferHandler.TransferSupport): DragPayload? {
+        if (!support.isDataFlavorSupported(DataFlavor.stringFlavor)) return null
+        val text = runCatching {
+            support.transferable.getTransferData(DataFlavor.stringFlavor) as? String
+        }.getOrNull() ?: return null
+        RequestDragData.decode(text)?.let { return DragPayload(DragKind.REQUEST, it) }
+        GroupDragData.decode(text)?.let { return DragPayload(DragKind.GROUP, it) }
+        return null
+    }
+
+    private fun targetNodeOf(support: TransferHandler.TransferSupport): DefaultMutableTreeNode? {
+        val drop = support.dropLocation as? JTree.DropLocation ?: return null
+        return drop.path?.lastPathComponent as? DefaultMutableTreeNode
+    }
+
+    private fun isBelowRowCenter(point: Point, node: DefaultMutableTreeNode): Boolean {
+        val row = tree.getRowForPath(TreePath(node.path))
+        if (row < 0) return false
+        val bounds = tree.getRowBounds(row) ?: return false
+        return point.y > bounds.y + bounds.height / 2
     }
 
     private fun buildHeader(): JComponent {
@@ -263,6 +344,9 @@ class RequestTreePanel(
     internal fun buildRequestMenu(request: HttpRequestConfig): JPopupMenu {
         val menu = JPopupMenu()
         menu.add(menuItem("Open") { onSelect(request) })
+        if (onGoToSource != null && request.springKey != null) {
+            menu.add(menuItem("Go to Source") { onGoToSource.invoke(request) })
+        }
         menu.add(menuItem("Duplicate") { onDuplicateRequest(request) })
         menu.add(menuItem("Rename…") { onRenameRequest(request) })
         menu.add(buildMoveToGroupMenu(request))
@@ -344,6 +428,10 @@ class RequestTreePanel(
             border = JBUI.Borders.empty(2, 4)
         }
     }
+
+    private enum class DragKind { REQUEST, GROUP }
+
+    private data class DragPayload(val kind: DragKind, val id: String)
 
     private sealed interface NodeData {
         data class Group(val group: RequestGroup) : NodeData
