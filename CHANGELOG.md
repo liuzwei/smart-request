@@ -3,7 +3,7 @@
 本项目的重要变更都会记录在这里，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.2.1] - 2026-11-10
 
 ### Added
 
@@ -11,6 +11,18 @@
   把请求拖到分组行上会移动到该分组末尾；请求树 → 场景画布的拖拽保持不变。
 - Spring 导入的请求右键新增 `Go to Source`，通过请求上保存的 `springKey` 找到 Controller 方法并打开对应代码位置；
   方法已被删除或请求是手工创建时不会显示。
+
+### Fixed
+
+- 在 `Params` 表格里编辑参数值后，`Path Params` 里的路径参数会消失或值被清空：表格改动会实时重写 URL，
+  `JTextField.setText()` 先删除旧文本再插入新文本，删除事件让 URL 监听器看到空串并把 Path 参数清空了。
+  现在 URL 监听器在内部同步期间完全跳过，只在最终 URL 上同步一次；Path 参数表也会记住占位符最后一次的值，
+  暂时从 URL 消失再恢复时不会丢值，并加了回归测试。
+
+## [1.2.0] - 2026-11-06
+
+### Added
+
 - 全局 Header / 全局 Params 支持**按请求关闭**：`Params` / `Headers` 页签右上角新增 `Use global params` /
   `Use global headers`，默认勾选。登录等尚未生成 `{{token}}` 的请求可以取消勾选，发送时不会合并、也不会解析
   对应的全局项，避免 `Authorization: Bearer {{token}}` 在登录前报未解析变量；其他请求继续默认使用。
@@ -91,10 +103,6 @@
 
 ### Fixed
 
-- 在 `Params` 表格里编辑参数值后，`Path Params` 里的路径参数会消失或值被清空：表格改动会实时重写 URL，
-  `JTextField.setText()` 先删除旧文本再插入新文本，删除事件让 URL 监听器看到空串并把 Path 参数清空了。
-  现在 URL 监听器在内部同步期间完全跳过，只在最终 URL 上同步一次；Path 参数表也会记住占位符最后一次的值，
-  暂时从 URL 消失再恢复时不会丢值，并加了回归测试。
 - 场景 `Response` Tab 连续查看多个步骤的响应时，`ResponsePanel` 在折叠批量事务外移除上一个 JSON 的手动折叠区域，
   IDEA 2026.2 会记录 `Fold regions must be added or removed inside batchFoldProcessing() only.`。
   现在手动折叠的移除也放在 `runBatchFoldingOperation` 内，并加了回归测试（`assertNoErrorLogged`）。
