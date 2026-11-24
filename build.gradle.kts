@@ -10,7 +10,7 @@ plugins {
 
 group = "dev.smartrequest"
 // Pre-release suffix keeps this compatibility line below main's 1.2.0 on IDEs where both can install.
-version = "1.2.2-2024.3"
+version = "1.2.3-2024.3"
 
 repositories {
     mavenCentral()
@@ -84,6 +84,18 @@ intellijPlatform {
         id = "dev.smartrequest.idea"
         name = "Smart Request"
         version = project.version.toString()
+
+        changeNotes = """
+            <ul>
+              <li>请求支持导入 / 导出：整库、单个分组或单个请求均可导出为 JSON，再导入到其他项目。</li>
+              <li>请求树新增搜索框，按名称、方法或 URL 实时过滤请求。</li>
+              <li>请求右键新增 Add to Scenario，可直接把请求加入场景；双击 Scenarios 列表或画布节点体验更顺。</li>
+              <li>Add Step 请求选择器按分组归类，场景画布支持拖拽节点连接点调整连线弧度。</li>
+              <li>响应区新增 Raw 视图，可查看未格式化的原始响应文本。</li>
+              <li>历史记录支持按 URL、方法、环境筛选；环境设置支持导出 / 导入变量。</li>
+              <li>修复了一些 bug。</li>
+            </ul>
+        """.trimIndent()
 
         ideaVersion {
             // Oldest supported IDE: IntelliJ IDEA 2024.3 (build 243), JBR 21.

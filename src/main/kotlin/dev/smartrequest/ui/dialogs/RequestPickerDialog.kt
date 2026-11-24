@@ -2,6 +2,7 @@ package dev.smartrequest.ui.dialogs
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -10,6 +11,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import dev.smartrequest.model.HttpRequestConfig
 import dev.smartrequest.service.SmartRequestProjectService
+import dev.smartrequest.ui.HttpMethodColors
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.MouseAdapter
@@ -23,8 +25,9 @@ import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 /**
- * Picks the request a new scenario step will send. Filtering matches name, method, URL and group,
- * and each row shows its group so requests with the same name stay distinguishable.
+ * Picks the request a new scenario step will send. Requests are grouped by their parent group, with
+ * a bold group header inserted before each group's requests so the user can browse the same structure
+ * as the request tree.
  */
 class RequestPickerDialog(
     project: Project,
@@ -80,33 +83,59 @@ class RequestPickerDialog(
 
     override fun getPreferredFocusedComponent(): JBTextField = searchField
 
-    fun selectedRequest(): HttpRequestConfig? = list.selectedValue?.request
+    fun selectedRequest(): HttpRequestConfig? =
+        (list.selectedValue as? Choice.RequestItem)?.request
 
     private fun rebuild() {
         val query = searchField.text.trim()
-        val previous = list.selectedValue?.request?.id
+        val previous = (list.selectedValue as? Choice.RequestItem)?.request?.id
         val all = service.state().groups.flatMap { group ->
-            group.requests.map { request -> Choice(request, group.name) }
+            val header = listOf(Choice.GroupHeader(group.name))
+            val requests = group.requests.map { request -> Choice.RequestItem(request) }
+            header + requests
         }
-        val matches = all.filter { choice ->
-            val request = choice.request
-            query.isEmpty() ||
-                request.name.contains(query, ignoreCase = true) ||
-                request.method.contains(query, ignoreCase = true) ||
-                request.url.contains(query, ignoreCase = true) ||
-                choice.groupName.contains(query, ignoreCase = true)
+        val matches = if (query.isEmpty()) {
+            // Show all, but collapse empty groups.
+            all.filter { choice ->
+                choice !is Choice.GroupHeader || groupHasVisibleRequests(choice.groupName, all, query)
+            }
+        } else {
+            all.filter { choice ->
+                when (choice) {
+                    is Choice.RequestItem -> {
+                        val request = choice.request
+                        request.name.contains(query, ignoreCase = true) ||
+                            request.method.contains(query, ignoreCase = true) ||
+                            request.url.contains(query, ignoreCase = true) ||
+                            choice.groupName.contains(query, ignoreCase = true)
+                    }
+                    is Choice.GroupHeader -> groupHasVisibleRequests(choice.groupName, all, query)
+                }
+            }
         }
         model.clear()
         matches.forEach(model::addElement)
-        emptyLabel.isVisible = matches.isEmpty()
-        val target = matches.firstOrNull { it.request.id == previous }
-            ?: matches.firstOrNull { it.request.id == lastUsedRequestId }
-            ?: matches.firstOrNull()
+        emptyLabel.isVisible = matches.none { it is Choice.RequestItem }
+        val target = matches.firstOrNull { it is Choice.RequestItem && it.request.id == previous }
+            ?: matches.firstOrNull { it is Choice.RequestItem && it.request.id == lastUsedRequestId }
+            ?: matches.firstOrNull { it is Choice.RequestItem }
         if (target != null) {
             list.setSelectedValue(target, true)
             list.ensureIndexIsVisible(matches.indexOf(target).coerceAtLeast(0))
         }
         updateOk()
+    }
+
+    private fun groupHasVisibleRequests(groupName: String, all: List<Choice>, query: String): Boolean {
+        if (query.isEmpty()) return true
+        return all.any { choice ->
+            choice is Choice.RequestItem && choice.groupName == groupName && (
+                choice.request.name.contains(query, ignoreCase = true) ||
+                    choice.request.method.contains(query, ignoreCase = true) ||
+                    choice.request.url.contains(query, ignoreCase = true) ||
+                    groupName.contains(query, ignoreCase = true)
+                )
+        }
     }
 
     private fun updateOk() {
@@ -121,11 +150,17 @@ class RequestPickerDialog(
     }
 
     internal fun selectRequest(requestId: String) {
-        val index = (0 until model.size()).firstOrNull { model.getElementAt(it).request.id == requestId } ?: return
+        val index = (0 until model.size()).firstOrNull {
+            val choice = model.getElementAt(it)
+            choice is Choice.RequestItem && choice.request.id == requestId
+        } ?: return
         list.selectedIndex = index
     }
 
-    internal fun visibleRequestIds(): List<String> = (0 until model.size()).map { model.getElementAt(it).request.id }
+    internal fun visibleRequestIds(): List<String> =
+        (0 until model.size()).mapNotNull { idx ->
+            (model.getElementAt(idx) as? Choice.RequestItem)?.request?.id
+        }
 
     internal fun isAddEnabled(): Boolean = okAction.isEnabled
 
@@ -136,7 +171,18 @@ class RequestPickerDialog(
         return request
     }
 
-    private data class Choice(val request: HttpRequestConfig, val groupName: String)
+    private sealed interface Choice {
+        val groupName: String
+
+        data class GroupHeader(override val groupName: String) : Choice
+        data class RequestItem(
+            val request: HttpRequestConfig,
+            override val groupName: String = ""
+        ) : Choice {
+            /** The actual group the request lives in, set during list construction. */
+            val actualGroupName: String get() = groupName
+        }
+    }
 
     private class RequestRenderer : javax.swing.DefaultListCellRenderer() {
         override fun getListCellRendererComponent(
@@ -147,9 +193,27 @@ class RequestPickerDialog(
             cellHasFocus: Boolean
         ): java.awt.Component {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            if (value is Choice) {
-                text = "${value.request.method}  ${value.request.name}  —  ${value.groupName}"
-                toolTipText = value.request.url
+            when (value) {
+                is Choice.GroupHeader -> {
+                    icon = null
+                    text = value.groupName
+                    font = font.deriveFont(java.awt.Font.BOLD)
+                    background = if (isSelected) list?.selectionBackground else UIUtil.getPanelBackground()
+                    foreground = if (isSelected) list?.selectionForeground else UIUtil.getLabelForeground()
+                    border = JBUI.Borders.empty(6, 4, 1, 4)
+                }
+                is Choice.RequestItem -> {
+                    icon = null
+                    text = "  ${value.request.method}  ${value.request.name}"
+                    toolTipText = value.request.url
+                    font = font.deriveFont(java.awt.Font.PLAIN)
+                    foreground = if (isSelected) {
+                        list?.selectionForeground
+                    } else {
+                        HttpMethodColors.of(value.request.method)
+                    }
+                    border = JBUI.Borders.empty(1, 8, 1, 4)
+                }
             }
             return this
         }

@@ -104,6 +104,27 @@ class ScenarioGraphCanvas(
 
     private var lastHint: String? = null
 
+    /** When true, edges that share the same endpoints are spread apart vertically. */
+    private var drawFanOut = true
+
+    // ---- hover buttons ----
+
+    private var hoverAddEdge: Rectangle2D? = null
+    private var hoverAddStep: Rectangle2D? = null
+
+    // ---- edge bend control ----
+
+    /** Per-edge bend offset applied to the curve midpoint, in screen pixels. */
+    private var edgeBends: MutableMap<String, Double> = HashMap()
+
+    private var dragBendEdgeId: String? = null
+    private var dragBendOriginBend: Double = 0.0
+    private var dragBendPressY: Int = 0
+    private var dragBendStarted = false
+
+    /** The edge whose bend handle the mouse is currently over. */
+    private var hoveredEdgeBendId: String? = null
+
     init {
         isOpaque = true
         isFocusable = true
@@ -271,6 +292,7 @@ class ScenarioGraphCanvas(
 
     private fun drawEdges(g: Graphics2D, scenario: ScenarioConfig) {
         val nodes = scenario.nodes.associateBy { it.id }
+        val fanOut = if (drawFanOut) edgeFanOut(scenario) else emptyMap()
         scenario.edges.forEach { edge ->
             val from = nodes[edge.from] ?: return@forEach
             val to = nodes[edge.to] ?: return@forEach
@@ -286,21 +308,61 @@ class ScenarioGraphCanvas(
                 derived -> BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
                 else -> BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
             }
-            drawEdge(g, from, to, color, stroke, arrow = true)
+            val edgeIndex = fanOut[edge.id] ?: 0
+            val groupTotal = edgeFanOutTotal(scenario, edge)
+            val offset = if (derived) 0.0 else fanOffset(edgeIndex, groupTotal)
+            val bend = edgeBends[edge.id]
+            drawEdge(g, from, to, offset, bend, color, stroke, arrow = true)
+
+            // Draw bend handle at curve midpoint for request-to-request edges.
+            if (!derived) {
+                val baseStart = screen(outPort(from))
+                val baseEnd = screen(inPort(to))
+                val s0 = if (offset == 0.0) baseStart else Point2D.Double(baseStart.x, baseStart.y + offset)
+                val e0 = if (offset == 0.0) baseEnd else Point2D.Double(baseEnd.x, baseEnd.y + offset)
+                val curve = edgeCurve(s0, e0, bend)
+                val mid = cubic(s0, curve.control1, curve.control2, e0, 0.5)
+                val handleRadius = 5.0
+                val handleHovered = edge.id == hoveredEdgeBendId
+                g.color = if (handleHovered) ACCENT else EDGE
+                g.fillOval(
+                    (mid.x - handleRadius).toInt(),
+                    (mid.y - handleRadius).toInt(),
+                    (handleRadius * 2).toInt(),
+                    (handleRadius * 2).toInt()
+                )
+                if (handleHovered || bend != null) {
+                    g.color = if (handleHovered) ACCENT else JBColor(0xB0B8C1, 0x6B7280)
+                    g.drawOval(
+                        (mid.x - handleRadius).toInt(),
+                        (mid.y - handleRadius).toInt(),
+                        (handleRadius * 2).toInt(),
+                        (handleRadius * 2).toInt()
+                    )
+                }
+            }
         }
     }
+
+    /** How many edges share the same (from, to) as [edge] (including itself). */
+    private fun edgeFanOutTotal(scenario: ScenarioConfig, edge: ScenarioEdge): Int =
+        scenario.edges.count { it.from == edge.from && it.to == edge.to }
 
     private fun drawEdge(
         g: Graphics2D,
         from: ScenarioNode,
         to: ScenarioNode,
+        offsetY: Double,
+        bend: Double?,
         color: Color,
         stroke: BasicStroke,
         arrow: Boolean
     ) {
-        val start = screen(outPort(from))
-        val end = screen(inPort(to))
-        val curve = edgeCurve(start, end)
+        val baseStart = screen(outPort(from))
+        val baseEnd = screen(inPort(to))
+        val start = if (offsetY == 0.0) baseStart else Point2D.Double(baseStart.x, baseStart.y + offsetY)
+        val end = if (offsetY == 0.0) baseEnd else Point2D.Double(baseEnd.x, baseEnd.y + offsetY)
+        val curve = edgeCurve(start, end, bend)
         g.color = color
         g.stroke = stroke
         g.draw(curve.path)
@@ -357,6 +419,44 @@ class ScenarioGraphCanvas(
         } else {
             drawTerminalNode(g, node, rect)
         }
+
+        if (hovered && state == null) {
+            drawHoverButtons(g, node, rect)
+        } else {
+            hoverAddEdge = null
+            hoverAddStep = null
+        }
+    }
+
+    private fun drawHoverButtons(g: Graphics2D, node: ScenarioNode, rect: Rectangle2D.Double) {
+        val btnSize = (18.0 * zoom).coerceIn(12.0, 22.0)
+        val radius = btnSize / 2
+        val portOut = screen(outPort(node))
+
+        // "+" button over the output port (right side) to start connecting.
+        val edgeBtnX = portOut.x - radius
+        val edgeBtnY = portOut.y - radius
+        hoverAddEdge = Rectangle2D.Double(edgeBtnX, edgeBtnY, btnSize, btnSize)
+        g.color = ACCENT
+        g.fillOval(edgeBtnX.toInt(), edgeBtnY.toInt(), btnSize.toInt(), btnSize.toInt())
+        g.color = Color.WHITE
+        g.font = baseFont.deriveFont(Font.BOLD, (12.0 * zoom).coerceIn(8.0, 14.0).toFloat())
+        val plus = "+"
+        val fm = g.fontMetrics
+        g.drawString(plus,
+            (edgeBtnX + (btnSize - fm.stringWidth(plus)) / 2).toInt(),
+            (edgeBtnY + (btnSize + fm.ascent - fm.descent) / 2).toInt())
+
+        // "+" button below the node to add a new step.
+        val addBtnX = rect.x + rect.width / 2 - radius
+        val addBtnY = rect.y + rect.height + 4.0 * zoom
+        hoverAddStep = Rectangle2D.Double(addBtnX, addBtnY, btnSize, btnSize)
+        g.color = JBColor(0x388E3C, 0x73BD79)
+        g.fillOval(addBtnX.toInt(), addBtnY.toInt(), btnSize.toInt(), btnSize.toInt())
+        g.color = Color.WHITE
+        g.drawString(plus,
+            (addBtnX + (btnSize - fm.stringWidth(plus)) / 2).toInt(),
+            (addBtnY + (btnSize + fm.ascent - fm.descent) / 2).toInt())
     }
 
     private fun drawRequestNode(g: Graphics2D, node: ScenarioNode, rect: Rectangle2D.Double) {
@@ -498,6 +598,40 @@ class ScenarioGraphCanvas(
         g.fill(arrowHead(curve.control2, end))
     }
 
+    // ---------------------------------------------------------------- edge fan-out
+
+    /**
+     * Maps each edge id to its ordinal position among edges that share the same direction
+     * `(from, to)`. Zero-based. The ordinals are used to spread overlapping curves apart
+     * so that branching/joining lines remain visible and individually selectable.
+     */
+    private fun edgeFanOut(scenario: ScenarioConfig): Map<String, Int> {
+        val groups = LinkedHashMap<String, ArrayList<String>>()
+        scenario.edges.forEach { edge ->
+            groups.getOrPut("${edge.from}\u0000${edge.to}") { ArrayList() }.add(edge.id)
+        }
+        val result = HashMap<String, Int>(scenario.edges.size)
+        groups.values.forEach { ids ->
+            ids.forEachIndexed { index, id -> result[id] = index }
+        }
+        return result
+    }
+
+    /** Vertical separation between two curves that share the same start and end port. */
+    private fun fanOffset(index: Int, total: Int): Double {
+        if (total <= 1) return 0.0
+        val step = FAN_STEP * zoom
+        val center = (total - 1) / 2.0
+        return (index - center) * step
+    }
+
+    /** Returns true when a fan-out was applied for a node with multiple incoming/outgoing edges. */
+    private fun usesFanOut(scenario: ScenarioConfig, nodeId: String): Boolean {
+        val incoming = scenario.edges.count { it.to == nodeId }
+        val outgoing = scenario.edges.count { it.from == nodeId }
+        return incoming > 1 || outgoing > 1
+    }
+
     // ---------------------------------------------------------------- geometry
 
     private fun nodeWidth(node: ScenarioNode): Double =
@@ -555,10 +689,35 @@ class ScenarioGraphCanvas(
     private fun distance(point: Point2D, target: Point): Double =
         Point2D.Double(target.x.toDouble(), target.y.toDouble()).distance(point)
 
-    private fun edgeCurve(start: Point2D, end: Point2D): Curve {
+    /** First edge whose midpoint bend handle contains [point], or null. */
+    private fun bendHandleAt(point: Point): String? {
+        val scenario = scenarioProvider() ?: return null
+        val nodes = scenario.nodes.associateBy { it.id }
+        val radius = 7.0
+        val fanOut = if (drawFanOut) edgeFanOut(scenario) else emptyMap()
+        return scenario.edges.firstOrNull { edge ->
+            val from = nodes[edge.from] ?: return@firstOrNull false
+            val to = nodes[edge.to] ?: return@firstOrNull false
+            if (!from.isRequestNode() || !to.isRequestNode()) return@firstOrNull false
+            val baseStart = screen(outPort(from))
+            val baseEnd = screen(inPort(to))
+            val edgeIndex = fanOut[edge.id] ?: 0
+            val groupTotal = edgeFanOutTotal(scenario, edge)
+            val offset = fanOffset(edgeIndex, groupTotal)
+            val s0 = if (offset == 0.0) baseStart else Point2D.Double(baseStart.x, baseStart.y + offset)
+            val e0 = if (offset == 0.0) baseEnd else Point2D.Double(baseEnd.x, baseEnd.y + offset)
+            val bend = edgeBends[edge.id]
+            val curve = edgeCurve(s0, e0, bend)
+            val mid = cubic(s0, curve.control1, curve.control2, e0, 0.5)
+            distance(mid, point) <= radius
+        }?.id
+    }
+
+    private fun edgeCurve(start: Point2D, end: Point2D, bend: Double? = null): Curve {
         val dx = max(45.0 * zoom, abs(end.x - start.x) * 0.45)
-        val control1 = Point2D.Double(start.x + dx, start.y)
-        val control2 = Point2D.Double(end.x - dx, end.y)
+        val midY = (start.y + end.y) / 2.0 + (bend ?: 0.0)
+        val control1 = Point2D.Double(start.x + dx, if (bend != null) midY else start.y)
+        val control2 = Point2D.Double(end.x - dx, if (bend != null) midY else end.y)
         val path = Path2D.Double().apply {
             moveTo(start.x, start.y)
             curveTo(control1.x, control1.y, control2.x, control2.y, end.x, end.y)
@@ -595,13 +754,20 @@ class ScenarioGraphCanvas(
         val scenario = scenarioProvider() ?: return null
         val nodes = scenario.nodes.associateBy { it.id }
         val tolerance = 7.0
+        val fanOut = if (drawFanOut) edgeFanOut(scenario) else emptyMap()
         return scenario.edges.asReversed().firstOrNull { edge ->
             val from = nodes[edge.from] ?: return@firstOrNull false
             val to = nodes[edge.to] ?: return@firstOrNull false
             if (!from.isRequestNode() || !to.isRequestNode()) return@firstOrNull false
-            val start = screen(outPort(from))
-            val end = screen(inPort(to))
-            val curve = edgeCurve(start, end)
+            val baseStart = screen(outPort(from))
+            val baseEnd = screen(inPort(to))
+            val edgeIndex = fanOut[edge.id] ?: 0
+            val groupTotal = edgeFanOutTotal(scenario, edge)
+            val offset = fanOffset(edgeIndex, groupTotal)
+            val bend = edgeBends[edge.id]
+            val start = if (offset == 0.0) baseStart else Point2D.Double(baseStart.x, baseStart.y + offset)
+            val end = if (offset == 0.0) baseEnd else Point2D.Double(baseEnd.x, baseEnd.y + offset)
+            val curve = edgeCurve(start, end, bend)
             var previous = start
             (1..24).any { step ->
                 val current = cubic(start, curve.control1, curve.control2, end, step / 24.0)
@@ -656,6 +822,37 @@ class ScenarioGraphCanvas(
             }
             if (!SwingUtilities.isLeftMouseButton(event)) return
 
+            // Hover button for "connect" on the right port.
+            val addEdge = hoverAddEdge
+            if (addEdge != null && addEdge.contains(event.point)) {
+                val hovered = hoveredNodeId ?: return
+                edgeSourceId = hovered
+                edgePointer = screen(outPort(nodeAt(event.point) ?: return))
+                edgeTargetId = null
+                edgeError = null
+                showHint("Drag to another step's left port")
+                repaint()
+                return
+            }
+
+            // Hover button for "add step" below the node.
+            val addStep = hoverAddStep
+            if (addStep != null && addStep.contains(event.point)) {
+                onAddStep()
+                return
+            }
+
+            // Bend control point on an edge.
+            val hoveredEdgeId = hoveredEdgeBendId
+            if (hoveredEdgeId != null) {
+                dragBendEdgeId = hoveredEdgeId
+                dragBendOriginBend = edgeBends[hoveredEdgeId] ?: 0.0
+                dragBendPressY = event.y
+                dragBendStarted = false
+                showHint("Drag to adjust curve")
+                return
+            }
+
             val output = outPortAt(event.point)
             if (output != null) {
                 edgeSourceId = output.id
@@ -696,6 +893,13 @@ class ScenarioGraphCanvas(
         }
 
         override fun mouseDragged(event: MouseEvent) {
+            if (dragBendEdgeId != null) {
+                dragBendStarted = true
+                val deltaY = event.y - dragBendPressY
+                edgeBends[dragBendEdgeId!!] = dragBendOriginBend + deltaY
+                repaint()
+                return
+            }
             if (edgeSourceId != null) {
                 val scenario = scenarioProvider() ?: return
                 edgePointer = event.point
@@ -739,6 +943,13 @@ class ScenarioGraphCanvas(
         }
 
         override fun mouseReleased(event: MouseEvent) {
+            if (dragBendEdgeId != null) {
+                dragBendEdgeId = null
+                dragBendStarted = false
+                showHint("Curve adjusted")
+                repaint()
+                return
+            }
             if (event.isPopupTrigger) {
                 showPopup(event)
                 return
@@ -769,10 +980,13 @@ class ScenarioGraphCanvas(
 
         override fun mouseMoved(event: MouseEvent) {
             hoveredNodeId = nodeAt(event.point)?.id
+            hoveredEdgeBendId = bendHandleAt(event.point)
             val overPort = outPortAt(event.point) != null || inPortAt(event.point) != null
+            val overButton = hoverAddEdge?.contains(event.point) == true || hoverAddStep?.contains(event.point) == true
             cursor = Cursor.getPredefinedCursor(
                 when {
-                    overPort -> Cursor.HAND_CURSOR
+                    overButton || overPort -> Cursor.HAND_CURSOR
+                    hoveredEdgeBendId != null -> Cursor.N_RESIZE_CURSOR
                     hoveredNodeId != null -> Cursor.HAND_CURSOR
                     edgeAt(event.point) != null -> Cursor.HAND_CURSOR
                     else -> Cursor.DEFAULT_CURSOR
@@ -791,6 +1005,7 @@ class ScenarioGraphCanvas(
 
         override fun mouseExited(event: MouseEvent) {
             hoveredNodeId = null
+            hoveredEdgeBendId = null
             repaint()
         }
     }
@@ -1067,6 +1282,9 @@ class ScenarioGraphCanvas(
         private const val MIN_ZOOM = 0.35
         private const val MAX_ZOOM = 2.0
         private const val FIT_MARGIN = 48.0
+
+        /** Vertical gap between two edge curves that overlap on the same port pair, in model pixels. */
+        private const val FAN_STEP = 16.0
 
         private val NODE_FILL = JBColor(0xFFFFFF, 0x2B2D30)
         private val NODE_HOVER_FILL = JBColor(0xF2F6FF, 0x343A43)

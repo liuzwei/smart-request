@@ -1,7 +1,11 @@
 package dev.smartrequest.ui.dialogs
 
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
@@ -34,7 +38,7 @@ import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 class EnvironmentDialog(
-    project: Project,
+    private val project: Project,
     private val state: SmartRequestState,
     private val service: SmartRequestProjectService
 ) : DialogWrapper(project, true) {
@@ -82,6 +86,8 @@ class EnvironmentDialog(
         addButton.addActionListener { addEnvironment() }
         duplicateButton.addActionListener { duplicateEnvironment() }
         removeButton.addActionListener { removeEnvironment() }
+        val exportButton = JButton("Export…").apply { addActionListener { exportEnvironment() } }
+        val importButton = JButton("Import…").apply { addActionListener { importEnvironment() } }
 
         val left = JBPanel<JBPanel<*>>(BorderLayout(0, 6)).apply {
             border = JBUI.Borders.emptyRight(12)
@@ -91,6 +97,11 @@ class EnvironmentDialog(
                 add(addButton)
                 add(duplicateButton)
                 add(removeButton)
+            }, BorderLayout.NORTH)
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                isOpaque = false
+                add(exportButton)
+                add(importButton)
             }, BorderLayout.SOUTH)
         }
 
@@ -223,6 +234,112 @@ class EnvironmentDialog(
     private fun updateButtons() {
         removeButton.isEnabled = environments.size > 1 && selected != null
     }
+
+    private fun exportEnvironment() {
+        val env = selected ?: return
+        val json = environmentToJson(env)
+        val descriptor = FileSaverDescriptor(
+            "Export Environment",
+            "Save environment variables as a JSON file",
+            "json"
+        )
+        val wrapper = FileChooserFactory.getInstance()
+            .createSaveFileDialog(descriptor, project)
+            .save(null as com.intellij.openapi.vfs.VirtualFile?, "${env.name.replace(" ", "_")}.json")
+            ?: return
+        try {
+            wrapper.file.writeText(json)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(project, "Could not write file: ${e.message}", "Export Error")
+        }
+    }
+
+    private fun importEnvironment() {
+        val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("json")
+            .withTitle("Import Environment")
+        val file = FileChooserFactory.getInstance()
+            .createFileChooser(descriptor, project, null)
+            .choose(project)
+            .firstOrNull() ?: return
+        val text = try {
+            String(file.contentsToByteArray(), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(project, "Could not read file: ${e.message}", "Import Error")
+            return
+        }
+        val imported = jsonToEnvironment(text) ?: return
+        environments.add(imported)
+        listModel.addElement(imported)
+        list.selectedIndex = listModel.size() - 1
+    }
+
+    private fun environmentToJson(env: EnvironmentConfig): String {
+        val sb = StringBuilder()
+        sb.appendLine("{")
+        sb.appendLine("  \"name\": \"${escapeJson(env.name)}\",")
+        sb.appendLine("  \"baseUrl\": \"${escapeJson(env.baseUrl)}\",")
+        sb.appendLine("  \"variables\": [")
+        env.variables.filter { it.key.isNotBlank() }.forEachIndexed { i, kv ->
+            sb.append("    { \"key\": \"${escapeJson(kv.key)}\", \"value\": \"${escapeJson(kv.value)}\" }")
+            if (i < env.variables.size - 1) sb.append(",")
+            sb.appendLine()
+        }
+        sb.appendLine("  ]")
+        sb.appendLine("}")
+        return sb.toString()
+    }
+
+    private fun jsonToEnvironment(text: String): EnvironmentConfig? {
+        val trimmed = text.trim()
+        if (!trimmed.startsWith("{")) {
+            Messages.showErrorDialog(project, "Not a valid environment JSON file.", "Import Error")
+            return null
+        }
+        val env = EnvironmentConfig(id = UUID.randomUUID().toString())
+        // Simple line-by-line parser for the compact JSON format we produce.
+        var inVars = false
+        var currentKey = ""
+        var currentValue = ""
+        for (line in trimmed.lines()) {
+            val clean = line.trim()
+            if (clean.startsWith("\"name\":")) {
+                env.name = extractJsonString(clean).ifBlank { "Imported" }
+            } else if (clean.startsWith("\"baseUrl\":")) {
+                env.baseUrl = extractJsonString(clean).ifBlank { "http://localhost:8080" }
+            } else if (clean.startsWith("\"variables\":")) {
+                inVars = true
+            } else if (inVars && clean.startsWith("{")) {
+                currentKey = ""
+                currentValue = ""
+            } else if (inVars && clean.startsWith("}")) {
+                if (currentKey.isNotBlank()) {
+                    env.variables.add(KeyValue(currentKey, currentValue))
+                }
+            }
+            if (clean.contains("\"key\":")) {
+                currentKey = extractJsonString(clean)
+            }
+            if (clean.contains("\"value\":")) {
+                currentValue = extractJsonString(clean)
+            }
+        }
+        env.name = env.name.takeIf { it != "Imported" } ?: "imported"
+        return env
+    }
+
+    private fun extractJsonString(line: String): String {
+        val start = line.indexOf('"')
+        val colon = line.indexOf(':', start + 1)
+        val valueStart = line.indexOf('"', colon + 1)
+        val valueEnd = line.indexOf('"', valueStart + 1)
+        if (valueStart < 0 || valueEnd < 0) return ""
+        return line.substring(valueStart + 1, valueEnd)
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    }
+
+    private fun escapeJson(text: String): String =
+        text.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun uniqueName(base: String): String {
         if (environments.none { it.name == base }) return base

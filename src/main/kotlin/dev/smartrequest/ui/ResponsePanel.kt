@@ -71,6 +71,15 @@ class ResponsePanel(
         isEnabled = false
         addActionListener { renderBody() }
     }
+    private val rawCheck = JCheckBox("Raw", false).apply {
+        isOpaque = false
+        addActionListener {
+            if (isSelected && lastResponse != null) {
+                prettyCheck.isSelected = false
+            }
+            renderBody()
+        }
+    }
     private val wrapCheck = JCheckBox("Wrap lines", true).apply {
         isOpaque = false
         addActionListener { applyWrap() }
@@ -244,6 +253,7 @@ class ResponsePanel(
             add(searchButton)
             add(foldButton)
             add(prettyCheck)
+            add(rawCheck)
             add(wrapCheck)
             add(contentTypeLabel)
         }
@@ -352,10 +362,12 @@ class ResponsePanel(
             append(response.durationMs).append(" ms")
             append(" · ")
             append(formatBytes(response.bodyBytes))
-            if (response.truncated) append(" (truncated)")
+            if (!rawCheck.isSelected && response.truncated) append(" (truncated)")
         }
         contentTypeLabel.text = response.contentType?.substringBefore(';')?.trim().orEmpty()
         contentTypeLabel.toolTipText = response.contentType
+        // Reset raw without triggering duplicate renderBody inside show().
+        rawCheck.isSelected = false
         prettyCheck.isEnabled = response.isJson && response.textual
         if (prettyCheck.isEnabled) prettyCheck.isSelected = true
         copyButton.isEnabled = true
@@ -413,15 +425,17 @@ class ResponsePanel(
             foldButton.isEnabled = false
             return
         }
-        var shown = if (prettyCheck.isSelected && response.isJson) {
-            JsonPrettyPrinter.prettyPrintOrNull(response.body) ?: response.body
-        } else {
-            response.body
+        val raw = rawCheck.isSelected
+        var shown = when {
+            raw -> response.body
+            prettyCheck.isSelected && response.isJson ->
+                JsonPrettyPrinter.prettyPrintOrNull(response.body) ?: response.body
+            else -> response.body
         }
-        if (response.truncated) {
+        if (!raw && response.truncated) {
             shown += "\n\n--- Response truncated at ${formatBytes(HttpTransport.MAX_BODY_BYTES.toLong())} ---"
         }
-        setBodyText(shown, json = response.isJson)
+        setBodyText(shown, json = !raw && response.isJson)
     }
 
     private fun setBodyText(text: String, json: Boolean) {
@@ -622,11 +636,11 @@ class ResponsePanel(
         val regions = manualFoldRegions.toList()
         manualFoldRegions.clear()
         if (regions.isEmpty()) return
-        // FoldingModel requires additions *and* removals to happen in one batch; outside a batch it
-        // logs "Fold regions must be added or removed inside batchFoldProcessing() only."
         editor.foldingModel.runBatchFoldingOperation {
             regions.forEach { region ->
-                runCatching { editor.foldingModel.removeFoldRegion(region) }
+                if (region.isValid) {
+                    runCatching { editor.foldingModel.removeFoldRegion(region) }
+                }
             }
         }
     }

@@ -53,7 +53,12 @@ class RequestTreePanel(
     private val onCopyCurl: (HttpRequestConfig, CurlFormat) -> Unit,
     private val onMoveRequest: (HttpRequestConfig, RequestGroup) -> Unit,
     private val onMoveRequestToNewGroup: (HttpRequestConfig) -> Unit,
-    private val onGoToSource: ((HttpRequestConfig) -> Unit)? = null
+    private val onGoToSource: ((HttpRequestConfig) -> Unit)? = null,
+    private val onAddToScenario: ((HttpRequestConfig) -> Unit)? = null,
+    /** Exports the given group, or every group when null. */
+    private val onExportRequests: ((RequestGroup?) -> Unit)? = null,
+    private val onExportSingleRequest: ((HttpRequestConfig) -> Unit)? = null,
+    private val onImportRequests: (() -> Unit)? = null
 ) : JBPanel<RequestTreePanel>(BorderLayout()) {
 
     private val root = DefaultMutableTreeNode()
@@ -78,6 +83,8 @@ class RequestTreePanel(
     private val nodeById = HashMap<String, DefaultMutableTreeNode>()
     private var rebuilding = false
     private var lastSelectedRequestId: String? = null
+    private var filterText: String = ""
+    private lateinit var filterField: com.intellij.ui.components.JBTextField
 
     init {
         border = JBUI.Borders.empty(4, 4, 4, 4)
@@ -219,6 +226,15 @@ class RequestTreePanel(
         val title = JBLabel("Requests").apply {
             font = font.deriveFont(Font.BOLD)
         }
+        val field = com.intellij.ui.components.JBTextField().apply {
+            emptyText.text = "Filter requests"
+            document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                override fun insertUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+                override fun removeUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+                override fun changedUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+            })
+        }
+        filterField = field
         val buttons = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
             isOpaque = false
             add(smallButton("+", "New request") {
@@ -226,10 +242,22 @@ class RequestTreePanel(
                 if (groupId != null) onCreateRequest(groupId)
             })
             add(smallButton("+ Group", "New group") { onCreateGroup() })
+            if (onImportRequests != null) {
+                add(smallButton("Import", "Import requests from a JSON file") { onImportRequests.invoke() })
+            }
+            if (onExportRequests != null) {
+                add(smallButton("Export", "Export all requests to a JSON file") { onExportRequests.invoke(null) })
+            }
         }
         header.add(title, BorderLayout.NORTH)
         header.add(buttons, BorderLayout.CENTER)
+        header.add(field, BorderLayout.SOUTH)
         return header
+    }
+
+    private fun applyFilter() {
+        filterText = filterField.text.trim()
+        rebuild()
     }
 
     private fun smallButton(text: String, tooltip: String, action: () -> Unit): JButton = JButton(text).apply {
@@ -261,10 +289,21 @@ class RequestTreePanel(
         try {
             root.removeAllChildren()
             nodeById.clear()
+            val query = filterText
             service.state().groups.forEach { group ->
+                val filtered = if (query.isEmpty()) {
+                    group.requests
+                } else {
+                    group.requests.filter { request ->
+                        request.name.contains(query, ignoreCase = true) ||
+                            request.method.contains(query, ignoreCase = true) ||
+                            request.url.contains(query, ignoreCase = true)
+                    }
+                }
+                if (query.isNotEmpty() && filtered.isEmpty()) return@forEach
                 val groupNode = DefaultMutableTreeNode(NodeData.Group(group))
                 nodeById[group.id] = groupNode
-                group.requests.forEach { request ->
+                filtered.forEach { request ->
                     val requestNode = DefaultMutableTreeNode(NodeData.Request(request))
                     nodeById[request.id] = requestNode
                     groupNode.add(requestNode)
@@ -274,7 +313,7 @@ class RequestTreePanel(
             model.reload()
             service.state().groups.forEach { group ->
                 val node = nodeById[group.id] ?: return@forEach
-                if (group.expanded) {
+                if (group.expanded || filterText.isNotEmpty()) {
                     tree.expandPath(TreePath(node.path))
                 }
             }
@@ -350,11 +389,18 @@ class RequestTreePanel(
         menu.add(menuItem("Duplicate") { onDuplicateRequest(request) })
         menu.add(menuItem("Rename…") { onRenameRequest(request) })
         menu.add(buildMoveToGroupMenu(request))
+        if (onAddToScenario != null) {
+            menu.addSeparator()
+            menu.add(menuItem("Add to Scenario") { onAddToScenario.invoke(request) })
+        }
         menu.addSeparator()
         val curlMenu = JMenu("Copy as cURL")
         curlMenu.add(menuItem(CurlFormat.LINUX.label) { onCopyCurl(request, CurlFormat.LINUX) })
         curlMenu.add(menuItem(CurlFormat.POWERSHELL.label) { onCopyCurl(request, CurlFormat.POWERSHELL) })
         menu.add(curlMenu)
+        if (onExportRequests != null) {
+            menu.add(menuItem("Export This Request…") { onExportSingleRequest?.invoke(request) })
+        }
         menu.addSeparator()
         menu.add(menuItem("Delete") { onDeleteRequest(request) })
         return menu
@@ -366,6 +412,10 @@ class RequestTreePanel(
         addSeparator()
         add(menuItem("Rename…") { onRenameGroup(group) })
         add(menuItem("Delete Group") { onDeleteGroup(group) })
+        if (onExportRequests != null) {
+            addSeparator()
+            add(menuItem("Export This Group…") { onExportRequests.invoke(group) })
+        }
     }
 
     private fun buildRootMenu(): JPopupMenu = JPopupMenu().apply {
@@ -373,6 +423,11 @@ class RequestTreePanel(
             service.state().groups.firstOrNull()?.let { onCreateRequest(it.id) }
         })
         add(menuItem("New Group") { onCreateGroup() })
+        if (onExportRequests != null || onImportRequests != null) {
+            addSeparator()
+            if (onExportRequests != null) add(menuItem("Export All Requests…") { onExportRequests.invoke(null) })
+            if (onImportRequests != null) add(menuItem("Import Requests…") { onImportRequests.invoke() })
+        }
     }
 
     private fun buildMoveToGroupMenu(request: HttpRequestConfig): JMenu {

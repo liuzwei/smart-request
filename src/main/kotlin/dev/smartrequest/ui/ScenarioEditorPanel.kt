@@ -551,6 +551,23 @@ class ScenarioEditorPanel(
         addRequestNode(request)
     }
 
+    /**
+     * Adds a step for the given request id; called from the request tree's "Add to Scenario"
+     * context menu. Opens the scenario and appends the step.
+     */
+    fun addRequestByRequestId(requestId: String) {
+        val current = scenario ?: return
+        val request = service.findRequest(requestId) ?: return
+        if (current.nodes.any { it.requestId == requestId }) {
+            notifyUser("'${request.name}' is already a step in this scenario.", NotificationType.INFORMATION)
+            return
+        }
+        addRequestNode(request)
+        val lastId = ScenarioGraph.requestNodes(current).lastOrNull()?.id ?: return
+        stepsTable.selectNode(lastId)
+        graphCanvas.selectNodeSilently(lastId)
+    }
+
     private fun addRequestNode(request: HttpRequestConfig) {
         val current = scenario ?: return
         recordHistory()

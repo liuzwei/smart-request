@@ -287,7 +287,7 @@ object ScenarioJson {
 }
 
 /** Minimal pretty JSON writer; keeps the file diff-friendly and library-free. */
-private object JsonText {
+internal object JsonText {
     fun write(value: Any?): String = buildString {
         appendValue(value, 0)
         append('\n')

@@ -29,10 +29,13 @@ import javax.swing.table.DefaultTableCellRenderer
 
 class HistoryDialog(
     project: Project,
-    private val service: SmartRequestProjectService
+    private val service: SmartRequestProjectService,
+    /** Called after the user restores a request, so the editor can switch to it. */
+    private val onRestore: ((RequestHistoryEntry) -> Unit)? = null
 ) : DialogWrapper(project, true) {
 
-    private val entries = service.state().history.map { it }.toMutableList()
+    private val allEntries = service.state().history.map { it }
+    private val entries = allEntries.toMutableList()
     private val model = HistoryTableModel(entries)
     private val table = JBTable(model).apply {
         rowHeight = JBUI.scale(26)
@@ -52,6 +55,9 @@ class HistoryDialog(
         columnModel.getColumn(5).preferredWidth = JBUI.scale(100)
         columnModel.getColumn(5).maxWidth = JBUI.scale(130)
         setDefaultRenderer(String::class.java, HistoryCellRenderer())
+    }
+    private val filterField = com.intellij.ui.components.JBTextField().apply {
+        emptyText.text = "Filter by URL, method or environment"
     }
 
     var restoredEntry: RequestHistoryEntry? = null
@@ -76,17 +82,28 @@ class HistoryDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val header = JPanel(BorderLayout()).apply {
+        val header = JPanel(BorderLayout(0, 4)).apply {
             isOpaque = false
             border = JBUI.Borders.empty(4, 4, 8, 4)
-            add(
-                JBLabel("History is stored in .idea/smart-request.xml, newest first (up to 100 entries).")
-                    .apply { foreground = UIUtil.getContextHelpForeground() },
-                BorderLayout.WEST
-            )
-            add(JButton("Clear History").apply {
-                addActionListener { clearHistory() }
-            }, BorderLayout.EAST)
+            val topRow = JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(
+                    JBLabel("History is stored in .idea/smart-request.xml, newest first (up to 100 entries).")
+                        .apply { foreground = UIUtil.getContextHelpForeground() },
+                    BorderLayout.WEST
+                )
+                add(JButton("Clear History").apply {
+                    addActionListener { clearHistory() }
+                }, BorderLayout.EAST)
+            }
+            add(topRow, BorderLayout.NORTH)
+            add(filterField.apply {
+                document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                    override fun insertUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+                    override fun removeUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+                    override fun changedUpdate(e: javax.swing.event.DocumentEvent) = applyFilter()
+                })
+            }, BorderLayout.SOUTH)
         }
         return JBPanel<JBPanel<*>>(BorderLayout(0, 4)).apply {
             border = JBUI.Borders.empty(8)
@@ -96,9 +113,26 @@ class HistoryDialog(
         }
     }
 
+    private fun applyFilter() {
+        val query = filterField.text.trim()
+        entries.clear()
+        if (query.isEmpty()) {
+            entries.addAll(allEntries)
+        } else {
+            entries.addAll(allEntries.filter { entry ->
+                entry.url.contains(query, ignoreCase = true) ||
+                    entry.method.contains(query, ignoreCase = true) ||
+                    entry.requestName.contains(query, ignoreCase = true) ||
+                    entry.environmentName.contains(query, ignoreCase = true)
+            })
+        }
+        model.fireTableDataChanged()
+    }
+
     override fun doOKAction() {
         val entry = table.selectedRow.takeIf { it >= 0 }?.let { entries.getOrNull(it) } ?: return
         restoredEntry = entry
+        onRestore?.invoke(entry)
         super.doOKAction()
     }
 

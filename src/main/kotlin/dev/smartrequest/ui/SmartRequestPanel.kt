@@ -13,6 +13,9 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBLabel
@@ -36,6 +39,10 @@ import dev.smartrequest.model.RequestGroup
 import dev.smartrequest.model.RequestHistoryEntry
 import dev.smartrequest.model.ScenarioConfig
 import dev.smartrequest.scenario.OpenRequestListener
+import dev.smartrequest.scenario.RequestImporter
+import dev.smartrequest.scenario.RequestJson
+import dev.smartrequest.scenario.RequestJsonException
+import dev.smartrequest.scenario.SmartRequestImportGuard
 import dev.smartrequest.scenario.ScenarioTopics
 import dev.smartrequest.service.SmartRequestProjectService
 import dev.smartrequest.spring.SmartRequestTopics
@@ -110,7 +117,11 @@ class SmartRequestPanel(
             onCopyCurl = { request, format -> copyCurl(request, format) },
             onMoveRequest = { request, group -> moveRequest(request, group) },
             onMoveRequestToNewGroup = { moveRequestToNewGroup(it) },
-            onGoToSource = { goToSource(it) }
+            onGoToSource = { goToSource(it) },
+            onAddToScenario = { request -> addRequestToScenario(request) },
+            onExportRequests = { group -> exportRequests(group) },
+            onExportSingleRequest = { request -> exportSingleRequest(request) },
+            onImportRequests = { importRequests() }
         )
         editorPanel = RequestEditorPanel(
             onSend = { sendRequest(it) },
@@ -404,6 +415,165 @@ class SmartRequestPanel(
         treePanel.rebuild(request.id)
         openRequest(request)
         editorPanel.focusUrl()
+    }
+
+    private fun addRequestToScenario(request: HttpRequestConfig) {
+        if (scenarioPanel != null) {
+            scenarioPanel!!.addRequestByRequestId(request.id)
+            showScenarioCard()
+            return
+        }
+        // No scenario is open: pick one from the list or create one.
+        val scenarios = service.state().scenarios
+        if (scenarios.isEmpty()) {
+            val scenario = service.addScenario(service.uniqueScenarioName("New Scenario"))
+            openScenario(scenario)
+            scenarioPanel!!.addRequestByRequestId(request.id)
+            return
+        }
+        if (scenarios.size == 1) {
+            openScenario(scenarios.first())
+            scenarioPanel!!.addRequestByRequestId(request.id)
+            return
+        }
+        val names = scenarios.map { it.name }.toTypedArray()
+        val choiceIndex = Messages.showChooseDialog(
+            project,
+            "Choose a scenario to add '${request.name}' to:",
+            "Add to Scenario",
+            Messages.getQuestionIcon(),
+            names,
+            names[0]
+        )
+        if (choiceIndex >= 0) {
+            openScenario(scenarios[choiceIndex])
+            scenarioPanel!!.addRequestByRequestId(request.id)
+        }
+    }
+
+    /** Exports one group, or every group when [onlyGroup] is null, to a self-contained JSON file. */
+    private fun exportRequests(onlyGroup: RequestGroup? = null) {
+        val groups = (if (onlyGroup != null) listOf(onlyGroup) else service.state().groups)
+            .filter { it.requests.isNotEmpty() }
+        if (groups.isEmpty()) {
+            Messages.showInfoMessage(project, "There are no requests to export.", "Export Requests")
+            return
+        }
+        val text = try {
+            RequestJson.encode(groups)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not prepare the export: ${e.message ?: e.javaClass.simpleName}",
+                "Export Requests"
+            )
+            return
+        }
+        val title = if (onlyGroup != null) "Export Group" else "Export Requests"
+        val descriptor = FileSaverDescriptor(
+            title,
+            "Save the requests as a JSON file",
+            "json"
+        )
+        val defaultName = if (onlyGroup != null) safeFileName(onlyGroup.name) + ".json" else "smart-request-requests.json"
+        val wrapper = FileChooserFactory.getInstance()
+            .createSaveFileDialog(descriptor, project)
+            .save(null as com.intellij.openapi.vfs.VirtualFile?, defaultName)
+            ?: return
+        try {
+            wrapper.file.writeText(text)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not write the file: ${e.message ?: e.javaClass.simpleName}",
+                title
+            )
+        }
+    }
+
+    /** Exports a single request, wrapped in its own group. */
+    private fun exportSingleRequest(request: HttpRequestConfig) {
+        val groupName = service.groupOf(request.id)?.name ?: "Requests"
+        val text = try {
+            RequestJson.encodeSingle(request, groupName)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not prepare the export: ${e.message ?: e.javaClass.simpleName}",
+                "Export Request"
+            )
+            return
+        }
+        val descriptor = FileSaverDescriptor("Export Request", "Save this request as a JSON file", "json")
+        val wrapper = FileChooserFactory.getInstance()
+            .createSaveFileDialog(descriptor, project)
+            .save(null as com.intellij.openapi.vfs.VirtualFile?, safeFileName(request.name) + ".json")
+            ?: return
+        try {
+            wrapper.file.writeText(text)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not write the file: ${e.message ?: e.javaClass.simpleName}",
+                "Export Request"
+            )
+        }
+    }
+
+    private fun safeFileName(name: String): String {
+        val cleaned = name.trim()
+            .map { character ->
+                if (character.isLetterOrDigit() || character == '-' || character == '_') character else '_'
+            }
+            .joinToString("")
+            .trim('_')
+        return cleaned.ifEmpty { "request" }
+    }
+
+    /** Imports requests from a JSON file exported by [exportRequests]. */
+    private fun importRequests() {
+        val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("json")
+            .withTitle("Import Requests")
+        val file = FileChooserFactory.getInstance()
+            .createFileChooser(descriptor, project, null)
+            .choose(project)
+            .firstOrNull() ?: return
+        val text = try {
+            String(file.contentsToByteArray(), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not read the file: ${e.message ?: e.javaClass.simpleName}",
+                "Import Requests"
+            )
+            return
+        }
+        try {
+            val groups = RequestJson.decode(text)
+            if (!SmartRequestImportGuard.shouldImport(text)) {
+                Messages.showInfoMessage(
+                    project,
+                    "This file was just imported; nothing was added again.",
+                    "Import Requests"
+                )
+                return
+            }
+            val count = RequestImporter.apply(service, groups)
+            treePanel.rebuild()
+            Messages.showInfoMessage(
+                project,
+                "Imported $count request(s) into ${groups.size} group(s).",
+                "Import Requests"
+            )
+        } catch (e: RequestJsonException) {
+            Messages.showWarningDialog(project, e.message ?: "The file is not a valid requests file.", "Import Requests")
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not import the file: ${e.message ?: e.javaClass.simpleName}",
+                "Import Requests"
+            )
+        }
     }
 
     private fun createGroup() {
